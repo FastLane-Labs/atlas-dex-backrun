@@ -1,0 +1,9 @@
+{
+  "name": "atlas-baseswap",
+  "version": "1.0.0",
+  "repository": "https://github.com/FastLane-Labs/atlas-baseswap",
+  "author": "FastLane",
+  "scripts": {
+    "deploy-base-sepolia": "source .env && forge script script/deploy_sepolia.s.sol:DeployBaseSwapSepoliaDAppControlScript --rpc-url ${BASE_SEPOLIA_RPC_URL} --broadcast --etherscan-api-key ${BASESCAN_API_KEY} --verify --delay 30"
+  }
+}

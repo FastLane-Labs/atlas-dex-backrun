@@ -1,0 +1,32 @@
+[profile.default]
+  src             = "src"
+  out             = "out"
+  libs            = ["lib"]
+  bytecode_hash   = "none"
+  optimizer_runs  = 50
+  timeout         = 30000
+  block_gas_limit = 300000000
+  gas_limit       = 3000000000
+  gas_price       = 1500000000
+  solc_version    = "0.8.28"
+  evm_version     = "cancun"
+  isolate         = false
+  gas_reports     = []
+  fs_permissions  = [{ access = "read-write", path = "./" }]
+
+[profile.ci]
+  fuzz      = { runs = 10_000 }
+  verbosity = 2
+
+[fmt]
+  bracket_spacing       = true
+  int_types             = "long"
+  line_length           = 120
+  multiline_func_header = "all"
+  number_underscore     = "thousands"
+  quote_style           = "double"
+  tab_width             = 4
+  wrap_comments         = true
+  ignore                = ["./**/*.t.sol"]
+
+  # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
