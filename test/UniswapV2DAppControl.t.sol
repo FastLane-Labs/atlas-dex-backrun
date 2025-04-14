@@ -33,13 +33,13 @@ IAtlasVerification constant ATLAS_VERIFICATION = IAtlasVerification(ATLAS_VERIFI
 
 // Token addresses
 address constant WETH_ADDRESS = 0x760AfE86e5de5fa0Ee542fc7B7B713e1c5425701; // Mainnet WETH
-address constant DAI_ADDRESS = 0xe1d2439b75fb9746E7Bc6cB777Ae10AA7f7ef9c5; // Mainnet DAI
+address constant SMON_ADDRESS = 0xe1d2439b75fb9746E7Bc6cB777Ae10AA7f7ef9c5; // Mainnet SMON
 address constant USDC_ADDRESS = 0xf817257fed379853cDe0fa4F97AB987181B1E5Ea; // Mainnet USDC
 address constant ETH = address(0);
 address constant NATIVE_TOKEN = address(0);
 
 IERC20 constant WETH = IERC20(WETH_ADDRESS);
-IERC20 constant DAI = IERC20(DAI_ADDRESS);
+IERC20 constant SMON = IERC20(SMON_ADDRESS);
 IERC20 constant USDC = IERC20(USDC_ADDRESS);
 
 contract UniswapV2DAppControlTest is BaseTest {
@@ -54,10 +54,10 @@ contract UniswapV2DAppControlTest is BaseTest {
     address[] _path2 = new address[](3);
 
     uint256 amountIn = 1 ether;
-    uint256 amountOut = 1 * 1e15; // 1000 DAI
+    uint256 amountOut = 1 * 1e15; // 1000 SMON
     uint256 amountInMax = 2 ether;
     address tokenIn = WETH_ADDRESS;
-    address tokenOut = DAI_ADDRESS;
+    address tokenOut = SMON_ADDRESS;
     uint256 bundlerGasEth = 1e16;
 
     Sig sig;
@@ -94,11 +94,11 @@ contract UniswapV2DAppControlTest is BaseTest {
 
         // Set up token paths for swaps
         _path1[0] = WETH_ADDRESS;
-        _path1[1] = DAI_ADDRESS;
+        _path1[1] = SMON_ADDRESS;
 
         _path2[0] = WETH_ADDRESS;
         _path2[1] = USDC_ADDRESS;
-        _path2[2] = DAI_ADDRESS;
+        _path2[2] = SMON_ADDRESS;
 
         // Fund user with ETH and tokens
         deal(userEOA, 10 ether);
@@ -114,7 +114,7 @@ contract UniswapV2DAppControlTest is BaseTest {
     }
 
     function test_swapExactTokensForTokens() public {
-        // User wants to swap exact WETH for DAI
+        // User wants to swap exact WETH for SMON
         bytes memory userOpData = abi.encodeWithSelector(
             0x38ed1739, // swapExactTokensForTokens selector
             amountIn,         // amountIn
@@ -142,12 +142,12 @@ contract UniswapV2DAppControlTest is BaseTest {
 
         uint256 userTokenBalanceAfter = _balanceOf(tokenOut, userEOA);
 
-        console.log("User DAI balance change:", userTokenBalanceAfter - userTokenBalanceBefore);
+        console.log("User SMON balance change:", userTokenBalanceAfter - userTokenBalanceBefore);
         assertGt(userTokenBalanceAfter - userTokenBalanceBefore, 0);
     }
 
     function test_swapTokensForExactTokens() public {
-        // User wants exact DAI for WETH
+        // User wants exact SMON for WETH
         bytes memory userOpData = abi.encodeWithSelector(
             0x8803dbee, // swapTokensForExactTokens selector
             amountOut,        // amountOut
@@ -172,12 +172,12 @@ contract UniswapV2DAppControlTest is BaseTest {
 
         uint256 userTokenBalanceAfter = _balanceOf(tokenOut, userEOA);
 
-        console.log("User DAI balance change:", userTokenBalanceAfter - userTokenBalanceBefore);
+        console.log("User SMON balance change:", userTokenBalanceAfter - userTokenBalanceBefore);
         assertGt(userTokenBalanceAfter - userTokenBalanceBefore, 0);
     }
 
     function test_swapExactETHForTokens() public {
-        // User wants to swap exact ETH for DAI
+        // User wants to swap exact ETH for SMON
         bytes memory userOpData = abi.encodeWithSelector(
             0x7ff36ab5, // swapExactETHForTokens selector
             1,                // amountOutMin (low for testing)
@@ -200,24 +200,24 @@ contract UniswapV2DAppControlTest is BaseTest {
 
         uint256 userTokenBalanceAfter = _balanceOf(tokenOut, userEOA);
 
-        console.log("User DAI balance change:", userTokenBalanceAfter - userTokenBalanceBefore);
+        console.log("User SMON balance change:", userTokenBalanceAfter - userTokenBalanceBefore);
         assertGt(userTokenBalanceAfter - userTokenBalanceBefore, 0);
     }
 
     function test_swapTokensForExactETH() public {
         uint256 reserves0;
         uint256 reserves1;
-        (reserves0, reserves1, ) = IUniswapV2Pair(IUniswapV2Factory(FACTORY).getPair(WETH_ADDRESS, DAI_ADDRESS)).getReserves();
+        (reserves0, reserves1, ) = IUniswapV2Pair(IUniswapV2Factory(FACTORY).getPair(WETH_ADDRESS, SMON_ADDRESS)).getReserves();
         uint256 amountIn = SwapMath.getAmountIn(amountOut, reserves1, reserves0);
-        // User wants exact ETH for DAI
+        // User wants exact ETH for SMON
         address[] memory reversePath = new address[](2);
-        reversePath[0] = DAI_ADDRESS;
+        reversePath[0] = SMON_ADDRESS;
         reversePath[1] = WETH_ADDRESS;
 
         bytes memory userOpData = abi.encodeWithSelector(
             0x4a25d94a, // swapTokensForExactETH selector
             amountOut,        // amountOut (ETH)
-            amountIn,        // amountInMax (DAI)
+            amountIn,        // amountInMax (SMON)
             reversePath,      // path
             executionEnvironment, // to
             block.timestamp + 1800 // deadline
@@ -232,7 +232,7 @@ contract UniswapV2DAppControlTest is BaseTest {
 
         // Do the actual metacall
         vm.startPrank(userEOA);
-        IERC20(DAI_ADDRESS).approve(address(ATLAS), amountIn);
+        IERC20(SMON_ADDRESS).approve(address(ATLAS), amountIn);
         ATLAS.metacall{ value: msgValue }(userOp, solverOps, dAppOp, address(0));
         vm.stopPrank();
 
@@ -243,14 +243,14 @@ contract UniswapV2DAppControlTest is BaseTest {
     }
 
     function test_swapExactTokensForETH() public {
-        // User wants to swap exact DAI for ETH
+        // User wants to swap exact SMON for ETH
         address[] memory reversePath = new address[](2);
-        reversePath[0] = DAI_ADDRESS;
+        reversePath[0] = SMON_ADDRESS;
         reversePath[1] = WETH_ADDRESS;
 
         bytes memory userOpData = abi.encodeWithSelector(
             0x18cbafe5, // swapExactTokensForETH selector
-            amountOut,        // amountIn (DAI)
+            amountOut,        // amountIn (SMON)
             1,                // amountOutMin (ETH, low for testing)
             reversePath,      // path
             executionEnvironment, // to
@@ -266,7 +266,7 @@ contract UniswapV2DAppControlTest is BaseTest {
 
         // Do the actual metacall
         vm.startPrank(userEOA);
-        IERC20(DAI_ADDRESS).approve(address(ATLAS), amountOut);
+        IERC20(SMON_ADDRESS).approve(address(ATLAS), amountOut);
         ATLAS.metacall{ value: msgValue }(userOp, solverOps, dAppOp, address(0));
         vm.stopPrank();
 
@@ -279,12 +279,12 @@ contract UniswapV2DAppControlTest is BaseTest {
     function test_swapETHForExactTokens() public {
         uint256 reserves0;
         uint256 reserves1;
-        (reserves0, reserves1, ) = IUniswapV2Pair(IUniswapV2Factory(FACTORY).getPair(WETH_ADDRESS, DAI_ADDRESS)).getReserves();
+        (reserves0, reserves1, ) = IUniswapV2Pair(IUniswapV2Factory(FACTORY).getPair(WETH_ADDRESS, SMON_ADDRESS)).getReserves();
         uint256 amountIn = SwapMath.getAmountIn(amountOut, reserves0, reserves1);
-        // User wants exact DAI for ETH
+        // User wants exact SMON for ETH
         bytes memory userOpData = abi.encodeWithSelector(
             0xfb3bdb41, // swapETHForExactTokens selector
-            amountOut,        // amountOut (DAI)
+            amountOut,        // amountOut (SMON)
             _path1,           // path
             executionEnvironment, // to
             block.timestamp + 1800 // deadline
@@ -304,12 +304,12 @@ contract UniswapV2DAppControlTest is BaseTest {
 
         uint256 userTokenBalanceAfter = _balanceOf(tokenOut, userEOA);
 
-        console.log("User DAI balance change:", userTokenBalanceAfter - userTokenBalanceBefore);
+        console.log("User SMON balance change:", userTokenBalanceAfter - userTokenBalanceBefore);
         assertGt(userTokenBalanceAfter - userTokenBalanceBefore, 0);
     }
 
     function test_swapExactTokensForTokensSupportingFeeOnTransferTokens() public {
-        // User wants to swap exact WETH for DAI with fee-on-transfer support
+        // User wants to swap exact WETH for SMON with fee-on-transfer support
         bytes memory userOpData = abi.encodeWithSelector(
             0x5c11d795, // swapExactTokensForTokensSupportingFeeOnTransferTokens selector
             amountIn,         // amountIn
@@ -334,12 +334,12 @@ contract UniswapV2DAppControlTest is BaseTest {
 
         uint256 userTokenBalanceAfter = _balanceOf(tokenOut, userEOA);
 
-        console.log("User DAI balance change:", userTokenBalanceAfter - userTokenBalanceBefore);
+        console.log("User SMON balance change:", userTokenBalanceAfter - userTokenBalanceBefore);
         assertGt(userTokenBalanceAfter - userTokenBalanceBefore, 0);
     }
 
     function test_swapExactETHForTokensSupportingFeeOnTransferTokens() public {
-        // User wants to swap exact ETH for DAI with fee-on-transfer support
+        // User wants to swap exact ETH for SMON with fee-on-transfer support
         bytes memory userOpData = abi.encodeWithSelector(
             0xb6f9de95, // swapExactETHForTokensSupportingFeeOnTransferTokens selector
             1,                // amountOutMin (low for testing)
@@ -362,19 +362,19 @@ contract UniswapV2DAppControlTest is BaseTest {
 
         uint256 userTokenBalanceAfter = _balanceOf(tokenOut, userEOA);
 
-        console.log("User DAI balance change:", userTokenBalanceAfter - userTokenBalanceBefore);
+        console.log("User SMON balance change:", userTokenBalanceAfter - userTokenBalanceBefore);
         assertGt(userTokenBalanceAfter - userTokenBalanceBefore, 0);
     }
 
     function test_swapExactTokensForETHSupportingFeeOnTransferTokens() public {
-        // User wants to swap exact DAI for ETH with fee-on-transfer support
+        // User wants to swap exact SMON for ETH with fee-on-transfer support
         address[] memory reversePath = new address[](2);
-        reversePath[0] = DAI_ADDRESS;
+        reversePath[0] = SMON_ADDRESS;
         reversePath[1] = WETH_ADDRESS;
 
         bytes memory userOpData = abi.encodeWithSelector(
             0x791ac947, // swapExactTokensForETHSupportingFeeOnTransferTokens selector
-            amountOut,        // amountIn (DAI)
+            amountOut,        // amountIn (SMON)
             1,                // amountOutMin (ETH, low for testing)
             reversePath,      // path
             executionEnvironment, // to
@@ -390,7 +390,7 @@ contract UniswapV2DAppControlTest is BaseTest {
 
         // Do the actual metacall
         vm.startPrank(userEOA);
-        IERC20(DAI_ADDRESS).approve(address(ATLAS), amountOut);
+        IERC20(SMON_ADDRESS).approve(address(ATLAS), amountOut);
         ATLAS.metacall{ value: msgValue }(userOp, solverOps, dAppOp, address(0));
         vm.stopPrank();
 
@@ -401,12 +401,12 @@ contract UniswapV2DAppControlTest is BaseTest {
     }
 
     function test_multiHopSwap() public {
-        // User wants to swap WETH for DAI through USDC
+        // User wants to swap WETH for SMON through USDC
         bytes memory userOpData = abi.encodeWithSelector(
             0x38ed1739, // swapExactTokensForTokens selector
             amountIn,         // amountIn
             1,                // amountOutMin (low for testing)
-            _path2,           // multi-hop path: WETH -> USDC -> DAI
+            _path2,           // multi-hop path: WETH -> USDC -> SMON
             executionEnvironment, // to
             block.timestamp + 1800 // deadline
         );
@@ -416,7 +416,7 @@ contract UniswapV2DAppControlTest is BaseTest {
         (UserOperation memory userOp, SolverOperation[] memory solverOps, DAppOperation memory dAppOp) =
             buildOperations(userOpData, 0);
 
-        uint256 userTokenBalanceBefore = _balanceOf(DAI_ADDRESS, userEOA);
+        uint256 userTokenBalanceBefore = _balanceOf(SMON_ADDRESS, userEOA);
 
         // Do the actual metacall
         vm.startPrank(userEOA);
@@ -424,9 +424,9 @@ contract UniswapV2DAppControlTest is BaseTest {
         ATLAS.metacall{ value: msgValue }(userOp, solverOps, dAppOp, address(0));
         vm.stopPrank();
 
-        uint256 userTokenBalanceAfter = _balanceOf(DAI_ADDRESS, userEOA);
+        uint256 userTokenBalanceAfter = _balanceOf(SMON_ADDRESS, userEOA);
 
-        console.log("User DAI balance change:", userTokenBalanceAfter - userTokenBalanceBefore);
+        console.log("User SMON balance change:", userTokenBalanceAfter - userTokenBalanceBefore);
         assertGt(userTokenBalanceAfter - userTokenBalanceBefore, 0);
     }
 
