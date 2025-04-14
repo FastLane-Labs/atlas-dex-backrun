@@ -26,11 +26,11 @@ struct SwapTokenInfo {
 
 contract UniswapV2DAppControl is DAppControl {
     // Uniswap V2 Router address (Mainnet)
-    address public constant SWAP_ROUTER = 0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D;
+    address public constant SWAP_ROUTER = 0xCa810D095e90Daae6e867c19DF6D9A8C56db2c89;
     uint256 public constant PERCENTAGE_DENOMINATOR = 10_000; //basis points denominator
     uint32 public constant SOLVER_GAS_LIMIT = 5_000_000;
     address internal constant _ETH = address(0); // address of the ETH token
-    address internal constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
+    address internal constant WETH = 0x760AfE86e5de5fa0Ee542fc7B7B713e1c5425701;
 
     // Function selectors for Uniswap V2 Router
     bytes4 private constant SWAP_EXACT_TOKENS_FOR_TOKENS = 0x38ed1739;

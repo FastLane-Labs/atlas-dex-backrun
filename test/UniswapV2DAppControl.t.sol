@@ -13,17 +13,22 @@ import { UserOperation } from "@atlas/types/UserOperation.sol";
 import { DAppOperation } from "@atlas/types/DAppOperation.sol";
 import { UniswapV2DAppControl, SwapTokenInfo } from "../src/UniswapV2DAppControl.sol";
 import { IUniswapV2Router02 } from "../src/interfaces/IUniswapV2Router.sol";
+import { IUniswapV2Pair } from "../src/interfaces/IUniswapV2Pair.sol";
+import { IUniswapV2Factory } from "../src/interfaces/IUniswapV2Factory.sol";
 import { IERC20 } from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+import { SwapMath } from "../src/SwapMath.sol";
 
 // Uniswap V2 mainnet addresses
-address constant SWAP_ROUTER = 0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D; // Uniswap V2 Router
+address constant SWAP_ROUTER = 0xCa810D095e90Daae6e867c19DF6D9A8C56db2c89; // Uniswap V2 Router
+address constant FACTORY = 0x0085388Da29e74b66ac6b6fF690973bE05403f67;
+address constant ATLAS = 0x81E8c782Abbe606366C246C6c85475009ff6fb84;
 
 IUniswapV2Router02 constant ROUTER = IUniswapV2Router02(SWAP_ROUTER);
 
 // Token addresses
-address constant WETH_ADDRESS = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2; // Mainnet WETH
-address constant DAI_ADDRESS = 0x6B175474E89094C44Da98b954EedeAC495271d0F; // Mainnet DAI
-address constant USDC_ADDRESS = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48; // Mainnet USDC
+address constant WETH_ADDRESS = 0x760AfE86e5de5fa0Ee542fc7B7B713e1c5425701; // Mainnet WETH
+address constant DAI_ADDRESS = 0xe1d2439b75fb9746E7Bc6cB777Ae10AA7f7ef9c5; // Mainnet DAI
+address constant USDC_ADDRESS = 0xf817257fed379853cDe0fa4F97AB987181B1E5Ea; // Mainnet USDC
 address constant ETH = address(0);
 address constant NATIVE_TOKEN = address(0);
 
@@ -43,7 +48,7 @@ contract UniswapV2DAppControlTest is BaseTest {
     address[] _path2 = new address[](3);
 
     uint256 amountIn = 1 ether;
-    uint256 amountOut = 1000 * 1e18; // 1000 DAI
+    uint256 amountOut = 1 * 1e15; // 1000 DAI
     uint256 amountInMax = 2 ether;
     address tokenIn = WETH_ADDRESS;
     address tokenOut = DAI_ADDRESS;
@@ -52,7 +57,9 @@ contract UniswapV2DAppControlTest is BaseTest {
     Sig sig;
 
     function setUp() public virtual override {
-        super.setUp(); // Use the BaseTest setUp
+        // super.setUp(); // Use the BaseTest setUp
+        __createAndLabelAccounts();
+        __deployAtlasContracts();
         
         // Create governance
         governancePK = 11_112;
@@ -91,8 +98,8 @@ contract UniswapV2DAppControlTest is BaseTest {
 
         // Fund user with ETH and tokens
         deal(userEOA, 10 ether);
-        deal(tokenIn, userEOA, amountIn * 2);
-        deal(tokenOut, userEOA, amountOut);
+        deal(tokenIn, userEOA, 10 ether);
+        deal(tokenOut, userEOA, 10 ether);
 
             // Add funding for governance
         deal(governanceEOA, 2e18);
@@ -194,6 +201,10 @@ contract UniswapV2DAppControlTest is BaseTest {
     }
 
     function test_swapTokensForExactETH() public {
+        uint256 reserves0;
+        uint256 reserves1;
+        (reserves0, reserves1, ) = IUniswapV2Pair(IUniswapV2Factory(FACTORY).getPair(WETH_ADDRESS, DAI_ADDRESS)).getReserves();
+        uint256 amountIn = SwapMath.getAmountIn(amountOut, reserves1, reserves0);
         // User wants exact ETH for DAI
         address[] memory reversePath = new address[](2);
         reversePath[0] = DAI_ADDRESS;
@@ -201,8 +212,8 @@ contract UniswapV2DAppControlTest is BaseTest {
 
         bytes memory userOpData = abi.encodeWithSelector(
             0x4a25d94a, // swapTokensForExactETH selector
-            0.5 ether,        // amountOut (ETH)
-            amountOut,        // amountInMax (DAI)
+            amountOut,        // amountOut (ETH)
+            amountIn,        // amountInMax (DAI)
             reversePath,      // path
             executionEnvironment, // to
             block.timestamp + 1800 // deadline
@@ -217,7 +228,7 @@ contract UniswapV2DAppControlTest is BaseTest {
 
         // Do the actual metacall
         vm.startPrank(userEOA);
-        IERC20(DAI_ADDRESS).approve(address(atlas), amountOut);
+        IERC20(DAI_ADDRESS).approve(address(atlas), amountIn);
         atlas.metacall{ value: msgValue }(userOp, solverOps, dAppOp, address(0));
         vm.stopPrank();
 
@@ -262,6 +273,10 @@ contract UniswapV2DAppControlTest is BaseTest {
     }
 
     function test_swapETHForExactTokens() public {
+        uint256 reserves0;
+        uint256 reserves1;
+        (reserves0, reserves1, ) = IUniswapV2Pair(IUniswapV2Factory(FACTORY).getPair(WETH_ADDRESS, DAI_ADDRESS)).getReserves();
+        uint256 amountIn = SwapMath.getAmountIn(amountOut, reserves0, reserves1);
         // User wants exact DAI for ETH
         bytes memory userOpData = abi.encodeWithSelector(
             0xfb3bdb41, // swapETHForExactTokens selector
@@ -271,10 +286,10 @@ contract UniswapV2DAppControlTest is BaseTest {
             block.timestamp + 1800 // deadline
         );
 
-        uint256 msgValue = amountInMax + bundlerGasEth;
+        uint256 msgValue = amountIn + bundlerGasEth;
 
         (UserOperation memory userOp, SolverOperation[] memory solverOps, DAppOperation memory dAppOp) =
-            buildOperations(userOpData, amountInMax);
+            buildOperations(userOpData, amountIn);
 
         uint256 userTokenBalanceBefore = _balanceOf(tokenOut, userEOA);
 
