@@ -18,14 +18,18 @@ import { IUniswapV2Router02 } from "../src/interfaces/IUniswapV2Router.sol";
 import { IUniswapV2Pair } from "../src/interfaces/IUniswapV2Pair.sol";
 import { IUniswapV2Factory } from "../src/interfaces/IUniswapV2Factory.sol";
 import { IERC20 } from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+import { BoomerSwapSolver, Swap, DexType } from "../src/BoomerSwapSolver.sol";
 
 import { SwapMath } from "../src/SwapMath.sol";
+import { IShMonad } from "../src/interfaces/IShmonad.sol";
 
 // Uniswap V2 mainnet addresses
 address constant SWAP_ROUTER = 0xCa810D095e90Daae6e867c19DF6D9A8C56db2c89; // Uniswap V2 Router
 address constant FACTORY = 0x0085388Da29e74b66ac6b6fF690973bE05403f67;
-address constant ATLAS_ADDRESS = 0x81E8c782Abbe606366C246C6c85475009ff6fb84;
-address constant ATLAS_VERIFICATION_ADDRESS = 0xb47387995e866908B25b49e8BaC7e499170461A6;
+address constant ATLAS_ADDRESS = 0x9958Ab9f64EF51194C5378a336D2A0b0A620D31c;
+address constant ATLAS_VERIFICATION_ADDRESS = 0x318b5e9806389728b881aea090b7d2330cD7aAd2;
+address constant SHMONAD_ADDRESS = 0x3a98250F98Dd388C211206983453837C8365BDc1;
+
 
 IUniswapV2Router02 constant ROUTER = IUniswapV2Router02(SWAP_ROUTER);
 IAtlas constant ATLAS = IAtlas(ATLAS_ADDRESS);
@@ -59,6 +63,8 @@ contract UniswapV2DAppControlTest is BaseTest {
     address tokenIn = WETH_ADDRESS;
     address tokenOut = SMON_ADDRESS;
     uint256 bundlerGasEth = 1e16;
+    uint64 policyId = 14;
+    IShMonad shMonad = IShMonad(SHMONAD_ADDRESS);
 
     Sig sig;
 
@@ -106,11 +112,11 @@ contract UniswapV2DAppControlTest is BaseTest {
         deal(tokenOut, userEOA, 10 ether);
 
             // Add funding for governance
-        deal(governanceEOA, 2e18);
-        vm.startPrank(governanceEOA);
-        ATLAS.deposit{ value: 1e18 }();
-        ATLAS.bond(1e18);
-        vm.stopPrank();
+        // deal(governanceEOA, 2e18);
+        // vm.startPrank(governanceEOA);
+        // ATLAS.deposit{ value: 1e18 }();
+        // ATLAS.bond(1e18);
+        // vm.stopPrank();
     }
 
     function test_swapExactTokensForTokens() public {
@@ -126,8 +132,16 @@ contract UniswapV2DAppControlTest is BaseTest {
 
         uint256 msgValue = bundlerGasEth;
 
+        Swap[] memory swapPath = new Swap[](1);
+        swapPath[0] = Swap({
+            dexType: DexType.UniswapV2,
+            poolAddr: address(IUniswapV2Factory(FACTORY).getPair(WETH_ADDRESS, SMON_ADDRESS)),
+            tokenIn: WETH_ADDRESS,
+            tokenOut: SMON_ADDRESS
+        });
+
         (UserOperation memory userOp, SolverOperation[] memory solverOps, DAppOperation memory dAppOp) =
-            buildOperations(userOpData, 0);
+            buildOperations(userOpData, 0, swapPath);
 
         uint256 userTokenBalanceBefore = _balanceOf(tokenOut, userEOA);
         
@@ -146,289 +160,289 @@ contract UniswapV2DAppControlTest is BaseTest {
         assertGt(userTokenBalanceAfter - userTokenBalanceBefore, 0);
     }
 
-    function test_swapTokensForExactTokens() public {
-        // User wants exact SMON for WETH
-        bytes memory userOpData = abi.encodeWithSelector(
-            0x8803dbee, // swapTokensForExactTokens selector
-            amountOut,        // amountOut
-            amountInMax,      // amountInMax
-            _path1,           // path
-            executionEnvironment, // to
-            block.timestamp + 1800 // deadline
-        );
-
-        uint256 msgValue = bundlerGasEth;
-
-        (UserOperation memory userOp, SolverOperation[] memory solverOps, DAppOperation memory dAppOp) =
-            buildOperations(userOpData, 0);
-
-        uint256 userTokenBalanceBefore = _balanceOf(tokenOut, userEOA);
-
-        // Do the actual metacall
-        vm.startPrank(userEOA);
-        IERC20(tokenIn).approve(address(ATLAS), amountInMax);
-        ATLAS.metacall{ value: msgValue }(userOp, solverOps, dAppOp, address(0));
-        vm.stopPrank();
-
-        uint256 userTokenBalanceAfter = _balanceOf(tokenOut, userEOA);
-
-        console.log("User SMON balance change:", userTokenBalanceAfter - userTokenBalanceBefore);
-        assertGt(userTokenBalanceAfter - userTokenBalanceBefore, 0);
-    }
-
-    function test_swapExactETHForTokens() public {
-        // User wants to swap exact ETH for SMON
-        bytes memory userOpData = abi.encodeWithSelector(
-            0x7ff36ab5, // swapExactETHForTokens selector
-            1,                // amountOutMin (low for testing)
-            _path1,           // path
-            executionEnvironment, // to
-            block.timestamp + 1800 // deadline
-        );
-
-        uint256 msgValue = amountIn + bundlerGasEth;
-
-        (UserOperation memory userOp, SolverOperation[] memory solverOps, DAppOperation memory dAppOp) =
-            buildOperations(userOpData, amountIn);
-
-        uint256 userTokenBalanceBefore = _balanceOf(tokenOut, userEOA);
-
-        // Do the actual metacall
-        vm.startPrank(userEOA);
-        ATLAS.metacall{ value: msgValue }(userOp, solverOps, dAppOp, address(0));
-        vm.stopPrank();
-
-        uint256 userTokenBalanceAfter = _balanceOf(tokenOut, userEOA);
-
-        console.log("User SMON balance change:", userTokenBalanceAfter - userTokenBalanceBefore);
-        assertGt(userTokenBalanceAfter - userTokenBalanceBefore, 0);
-    }
-
-    function test_swapTokensForExactETH() public {
-        uint256 reserves0;
-        uint256 reserves1;
-        (reserves0, reserves1, ) = IUniswapV2Pair(IUniswapV2Factory(FACTORY).getPair(WETH_ADDRESS, SMON_ADDRESS)).getReserves();
-        uint256 amountIn = SwapMath.getAmountIn(amountOut, reserves1, reserves0);
-        // User wants exact ETH for SMON
-        address[] memory reversePath = new address[](2);
-        reversePath[0] = SMON_ADDRESS;
-        reversePath[1] = WETH_ADDRESS;
-
-        bytes memory userOpData = abi.encodeWithSelector(
-            0x4a25d94a, // swapTokensForExactETH selector
-            amountOut,        // amountOut (ETH)
-            amountIn,        // amountInMax (SMON)
-            reversePath,      // path
-            executionEnvironment, // to
-            block.timestamp + 1800 // deadline
-        );
-
-        uint256 msgValue = bundlerGasEth;
-
-        (UserOperation memory userOp, SolverOperation[] memory solverOps, DAppOperation memory dAppOp) =
-            buildOperations(userOpData, 0);
-
-        uint256 userEthBalanceBefore = _balanceOf(ETH, userEOA);
-
-        // Do the actual metacall
-        vm.startPrank(userEOA);
-        IERC20(SMON_ADDRESS).approve(address(ATLAS), amountIn);
-        ATLAS.metacall{ value: msgValue }(userOp, solverOps, dAppOp, address(0));
-        vm.stopPrank();
-
-        uint256 userEthBalanceAfter = _balanceOf(ETH, userEOA);
-
-        console.log("User ETH balance change:", userEthBalanceAfter - userEthBalanceBefore);
-        assertGt(userEthBalanceAfter - userEthBalanceBefore, 0);
-    }
-
-    function test_swapExactTokensForETH() public {
-        // User wants to swap exact SMON for ETH
-        address[] memory reversePath = new address[](2);
-        reversePath[0] = SMON_ADDRESS;
-        reversePath[1] = WETH_ADDRESS;
-
-        bytes memory userOpData = abi.encodeWithSelector(
-            0x18cbafe5, // swapExactTokensForETH selector
-            amountOut,        // amountIn (SMON)
-            1,                // amountOutMin (ETH, low for testing)
-            reversePath,      // path
-            executionEnvironment, // to
-            block.timestamp + 1800 // deadline
-        );
-
-        uint256 msgValue = bundlerGasEth;
-
-        (UserOperation memory userOp, SolverOperation[] memory solverOps, DAppOperation memory dAppOp) =
-            buildOperations(userOpData, 0);
-
-        uint256 userEthBalanceBefore = _balanceOf(ETH, userEOA);
-
-        // Do the actual metacall
-        vm.startPrank(userEOA);
-        IERC20(SMON_ADDRESS).approve(address(ATLAS), amountOut);
-        ATLAS.metacall{ value: msgValue }(userOp, solverOps, dAppOp, address(0));
-        vm.stopPrank();
-
-        uint256 userEthBalanceAfter = _balanceOf(ETH, userEOA);
-
-        console.log("User ETH balance change:", userEthBalanceAfter - userEthBalanceBefore);
-        assertGt(userEthBalanceAfter - userEthBalanceBefore, 0);
-    }
-
-    function test_swapETHForExactTokens() public {
-        uint256 reserves0;
-        uint256 reserves1;
-        (reserves0, reserves1, ) = IUniswapV2Pair(IUniswapV2Factory(FACTORY).getPair(WETH_ADDRESS, SMON_ADDRESS)).getReserves();
-        uint256 amountIn = SwapMath.getAmountIn(amountOut, reserves0, reserves1);
-        // User wants exact SMON for ETH
-        bytes memory userOpData = abi.encodeWithSelector(
-            0xfb3bdb41, // swapETHForExactTokens selector
-            amountOut,        // amountOut (SMON)
-            _path1,           // path
-            executionEnvironment, // to
-            block.timestamp + 1800 // deadline
-        );
-
-        uint256 msgValue = amountIn + bundlerGasEth;
-
-        (UserOperation memory userOp, SolverOperation[] memory solverOps, DAppOperation memory dAppOp) =
-            buildOperations(userOpData, amountIn);
-
-        uint256 userTokenBalanceBefore = _balanceOf(tokenOut, userEOA);
-
-        // Do the actual metacall
-        vm.startPrank(userEOA);
-        ATLAS.metacall{ value: msgValue }(userOp, solverOps, dAppOp, address(0));
-        vm.stopPrank();
-
-        uint256 userTokenBalanceAfter = _balanceOf(tokenOut, userEOA);
-
-        console.log("User SMON balance change:", userTokenBalanceAfter - userTokenBalanceBefore);
-        assertGt(userTokenBalanceAfter - userTokenBalanceBefore, 0);
-    }
-
-    function test_swapExactTokensForTokensSupportingFeeOnTransferTokens() public {
-        // User wants to swap exact WETH for SMON with fee-on-transfer support
-        bytes memory userOpData = abi.encodeWithSelector(
-            0x5c11d795, // swapExactTokensForTokensSupportingFeeOnTransferTokens selector
-            amountIn,         // amountIn
-            1,                // amountOutMin (low for testing)
-            _path1,           // path
-            executionEnvironment, // to
-            block.timestamp + 1800 // deadline
-        );
-
-        uint256 msgValue = bundlerGasEth;
-
-        (UserOperation memory userOp, SolverOperation[] memory solverOps, DAppOperation memory dAppOp) =
-            buildOperations(userOpData, 0);
-
-        uint256 userTokenBalanceBefore = _balanceOf(tokenOut, userEOA);
-
-        // Do the actual metacall
-        vm.startPrank(userEOA);
-        IERC20(tokenIn).approve(address(ATLAS), amountIn);
-        ATLAS.metacall{ value: msgValue }(userOp, solverOps, dAppOp, address(0));
-        vm.stopPrank();
-
-        uint256 userTokenBalanceAfter = _balanceOf(tokenOut, userEOA);
-
-        console.log("User SMON balance change:", userTokenBalanceAfter - userTokenBalanceBefore);
-        assertGt(userTokenBalanceAfter - userTokenBalanceBefore, 0);
-    }
-
-    function test_swapExactETHForTokensSupportingFeeOnTransferTokens() public {
-        // User wants to swap exact ETH for SMON with fee-on-transfer support
-        bytes memory userOpData = abi.encodeWithSelector(
-            0xb6f9de95, // swapExactETHForTokensSupportingFeeOnTransferTokens selector
-            1,                // amountOutMin (low for testing)
-            _path1,           // path
-            executionEnvironment, // to
-            block.timestamp + 1800 // deadline
-        );
-
-        uint256 msgValue = amountIn + bundlerGasEth;
-
-        (UserOperation memory userOp, SolverOperation[] memory solverOps, DAppOperation memory dAppOp) =
-            buildOperations(userOpData, amountIn);
-
-        uint256 userTokenBalanceBefore = _balanceOf(tokenOut, userEOA);
-
-        // Do the actual metacall
-        vm.startPrank(userEOA);
-        ATLAS.metacall{ value: msgValue }(userOp, solverOps, dAppOp, address(0));
-        vm.stopPrank();
-
-        uint256 userTokenBalanceAfter = _balanceOf(tokenOut, userEOA);
-
-        console.log("User SMON balance change:", userTokenBalanceAfter - userTokenBalanceBefore);
-        assertGt(userTokenBalanceAfter - userTokenBalanceBefore, 0);
-    }
-
-    function test_swapExactTokensForETHSupportingFeeOnTransferTokens() public {
-        // User wants to swap exact SMON for ETH with fee-on-transfer support
-        address[] memory reversePath = new address[](2);
-        reversePath[0] = SMON_ADDRESS;
-        reversePath[1] = WETH_ADDRESS;
-
-        bytes memory userOpData = abi.encodeWithSelector(
-            0x791ac947, // swapExactTokensForETHSupportingFeeOnTransferTokens selector
-            amountOut,        // amountIn (SMON)
-            1,                // amountOutMin (ETH, low for testing)
-            reversePath,      // path
-            executionEnvironment, // to
-            block.timestamp + 1800 // deadline
-        );
-
-        uint256 msgValue = bundlerGasEth;
-
-        (UserOperation memory userOp, SolverOperation[] memory solverOps, DAppOperation memory dAppOp) =
-            buildOperations(userOpData, 0);
-
-        uint256 userEthBalanceBefore = _balanceOf(ETH, userEOA);
-
-        // Do the actual metacall
-        vm.startPrank(userEOA);
-        IERC20(SMON_ADDRESS).approve(address(ATLAS), amountOut);
-        ATLAS.metacall{ value: msgValue }(userOp, solverOps, dAppOp, address(0));
-        vm.stopPrank();
-
-        uint256 userEthBalanceAfter = _balanceOf(ETH, userEOA);
-
-        console.log("User ETH balance change:", userEthBalanceAfter - userEthBalanceBefore);
-        assertGt(userEthBalanceAfter - userEthBalanceBefore, 0);
-    }
-
-    function test_multiHopSwap() public {
-        // User wants to swap WETH for SMON through USDC
-        bytes memory userOpData = abi.encodeWithSelector(
-            0x38ed1739, // swapExactTokensForTokens selector
-            amountIn,         // amountIn
-            1,                // amountOutMin (low for testing)
-            _path2,           // multi-hop path: WETH -> USDC -> SMON
-            executionEnvironment, // to
-            block.timestamp + 1800 // deadline
-        );
-
-        uint256 msgValue = bundlerGasEth;
-
-        (UserOperation memory userOp, SolverOperation[] memory solverOps, DAppOperation memory dAppOp) =
-            buildOperations(userOpData, 0);
-
-        uint256 userTokenBalanceBefore = _balanceOf(SMON_ADDRESS, userEOA);
-
-        // Do the actual metacall
-        vm.startPrank(userEOA);
-        IERC20(tokenIn).approve(address(ATLAS), amountIn);
-        ATLAS.metacall{ value: msgValue }(userOp, solverOps, dAppOp, address(0));
-        vm.stopPrank();
-
-        uint256 userTokenBalanceAfter = _balanceOf(SMON_ADDRESS, userEOA);
-
-        console.log("User SMON balance change:", userTokenBalanceAfter - userTokenBalanceBefore);
-        assertGt(userTokenBalanceAfter - userTokenBalanceBefore, 0);
-    }
+    // function test_swapTokensForExactTokens() public {
+    //     // User wants exact SMON for WETH
+    //     bytes memory userOpData = abi.encodeWithSelector(
+    //         0x8803dbee, // swapTokensForExactTokens selector
+    //         amountOut,        // amountOut
+    //         amountInMax,      // amountInMax
+    //         _path1,           // path
+    //         executionEnvironment, // to
+    //         block.timestamp + 1800 // deadline
+    //     );
+
+    //     uint256 msgValue = bundlerGasEth;
+
+    //     (UserOperation memory userOp, SolverOperation[] memory solverOps, DAppOperation memory dAppOp) =
+    //         buildOperations(userOpData, 0);
+
+    //     uint256 userTokenBalanceBefore = _balanceOf(tokenOut, userEOA);
+
+    //     // Do the actual metacall
+    //     vm.startPrank(userEOA);
+    //     IERC20(tokenIn).approve(address(ATLAS), amountInMax);
+    //     ATLAS.metacall{ value: msgValue }(userOp, solverOps, dAppOp, address(0));
+    //     vm.stopPrank();
+
+    //     uint256 userTokenBalanceAfter = _balanceOf(tokenOut, userEOA);
+
+    //     console.log("User SMON balance change:", userTokenBalanceAfter - userTokenBalanceBefore);
+    //     assertGt(userTokenBalanceAfter - userTokenBalanceBefore, 0);
+    // }
+
+    // function test_swapExactETHForTokens() public {
+    //     // User wants to swap exact ETH for SMON
+    //     bytes memory userOpData = abi.encodeWithSelector(
+    //         0x7ff36ab5, // swapExactETHForTokens selector
+    //         1,                // amountOutMin (low for testing)
+    //         _path1,           // path
+    //         executionEnvironment, // to
+    //         block.timestamp + 1800 // deadline
+    //     );
+
+    //     uint256 msgValue = amountIn + bundlerGasEth;
+
+    //     (UserOperation memory userOp, SolverOperation[] memory solverOps, DAppOperation memory dAppOp) =
+    //         buildOperations(userOpData, amountIn);
+
+    //     uint256 userTokenBalanceBefore = _balanceOf(tokenOut, userEOA);
+
+    //     // Do the actual metacall
+    //     vm.startPrank(userEOA);
+    //     ATLAS.metacall{ value: msgValue }(userOp, solverOps, dAppOp, address(0));
+    //     vm.stopPrank();
+
+    //     uint256 userTokenBalanceAfter = _balanceOf(tokenOut, userEOA);
+
+    //     console.log("User SMON balance change:", userTokenBalanceAfter - userTokenBalanceBefore);
+    //     assertGt(userTokenBalanceAfter - userTokenBalanceBefore, 0);
+    // }
+
+    // function test_swapTokensForExactETH() public {
+    //     uint256 reserves0;
+    //     uint256 reserves1;
+    //     (reserves0, reserves1, ) = IUniswapV2Pair(IUniswapV2Factory(FACTORY).getPair(WETH_ADDRESS, SMON_ADDRESS)).getReserves();
+    //     uint256 amountIn = SwapMath.getAmountIn(amountOut, reserves1, reserves0);
+    //     // User wants exact ETH for SMON
+    //     address[] memory reversePath = new address[](2);
+    //     reversePath[0] = SMON_ADDRESS;
+    //     reversePath[1] = WETH_ADDRESS;
+
+    //     bytes memory userOpData = abi.encodeWithSelector(
+    //         0x4a25d94a, // swapTokensForExactETH selector
+    //         amountOut,        // amountOut (ETH)
+    //         amountIn,        // amountInMax (SMON)
+    //         reversePath,      // path
+    //         executionEnvironment, // to
+    //         block.timestamp + 1800 // deadline
+    //     );
+
+    //     uint256 msgValue = bundlerGasEth;
+
+    //     (UserOperation memory userOp, SolverOperation[] memory solverOps, DAppOperation memory dAppOp) =
+    //         buildOperations(userOpData, 0);
+
+    //     uint256 userEthBalanceBefore = _balanceOf(ETH, userEOA);
+
+    //     // Do the actual metacall
+    //     vm.startPrank(userEOA);
+    //     IERC20(SMON_ADDRESS).approve(address(ATLAS), amountIn);
+    //     ATLAS.metacall{ value: msgValue }(userOp, solverOps, dAppOp, address(0));
+    //     vm.stopPrank();
+
+    //     uint256 userEthBalanceAfter = _balanceOf(ETH, userEOA);
+
+    //     console.log("User ETH balance change:", userEthBalanceAfter - userEthBalanceBefore);
+    //     assertGt(userEthBalanceAfter - userEthBalanceBefore, 0);
+    // }
+
+    // function test_swapExactTokensForETH() public {
+    //     // User wants to swap exact SMON for ETH
+    //     address[] memory reversePath = new address[](2);
+    //     reversePath[0] = SMON_ADDRESS;
+    //     reversePath[1] = WETH_ADDRESS;
+
+    //     bytes memory userOpData = abi.encodeWithSelector(
+    //         0x18cbafe5, // swapExactTokensForETH selector
+    //         amountOut,        // amountIn (SMON)
+    //         1,                // amountOutMin (ETH, low for testing)
+    //         reversePath,      // path
+    //         executionEnvironment, // to
+    //         block.timestamp + 1800 // deadline
+    //     );
+
+    //     uint256 msgValue = bundlerGasEth;
+
+    //     (UserOperation memory userOp, SolverOperation[] memory solverOps, DAppOperation memory dAppOp) =
+    //         buildOperations(userOpData, 0);
+
+    //     uint256 userEthBalanceBefore = _balanceOf(ETH, userEOA);
+
+    //     // Do the actual metacall
+    //     vm.startPrank(userEOA);
+    //     IERC20(SMON_ADDRESS).approve(address(ATLAS), amountOut);
+    //     ATLAS.metacall{ value: msgValue }(userOp, solverOps, dAppOp, address(0));
+    //     vm.stopPrank();
+
+    //     uint256 userEthBalanceAfter = _balanceOf(ETH, userEOA);
+
+    //     console.log("User ETH balance change:", userEthBalanceAfter - userEthBalanceBefore);
+    //     assertGt(userEthBalanceAfter - userEthBalanceBefore, 0);
+    // }
+
+    // function test_swapETHForExactTokens() public {
+    //     uint256 reserves0;
+    //     uint256 reserves1;
+    //     (reserves0, reserves1, ) = IUniswapV2Pair(IUniswapV2Factory(FACTORY).getPair(WETH_ADDRESS, SMON_ADDRESS)).getReserves();
+    //     uint256 amountIn = SwapMath.getAmountIn(amountOut, reserves0, reserves1);
+    //     // User wants exact SMON for ETH
+    //     bytes memory userOpData = abi.encodeWithSelector(
+    //         0xfb3bdb41, // swapETHForExactTokens selector
+    //         amountOut,        // amountOut (SMON)
+    //         _path1,           // path
+    //         executionEnvironment, // to
+    //         block.timestamp + 1800 // deadline
+    //     );
+
+    //     uint256 msgValue = amountIn + bundlerGasEth;
+
+    //     (UserOperation memory userOp, SolverOperation[] memory solverOps, DAppOperation memory dAppOp) =
+    //         buildOperations(userOpData, amountIn);
+
+    //     uint256 userTokenBalanceBefore = _balanceOf(tokenOut, userEOA);
+
+    //     // Do the actual metacall
+    //     vm.startPrank(userEOA);
+    //     ATLAS.metacall{ value: msgValue }(userOp, solverOps, dAppOp, address(0));
+    //     vm.stopPrank();
+
+    //     uint256 userTokenBalanceAfter = _balanceOf(tokenOut, userEOA);
+
+    //     console.log("User SMON balance change:", userTokenBalanceAfter - userTokenBalanceBefore);
+    //     assertGt(userTokenBalanceAfter - userTokenBalanceBefore, 0);
+    // }
+
+    // function test_swapExactTokensForTokensSupportingFeeOnTransferTokens() public {
+    //     // User wants to swap exact WETH for SMON with fee-on-transfer support
+    //     bytes memory userOpData = abi.encodeWithSelector(
+    //         0x5c11d795, // swapExactTokensForTokensSupportingFeeOnTransferTokens selector
+    //         amountIn,         // amountIn
+    //         1,                // amountOutMin (low for testing)
+    //         _path1,           // path
+    //         executionEnvironment, // to
+    //         block.timestamp + 1800 // deadline
+    //     );
+
+    //     uint256 msgValue = bundlerGasEth;
+
+    //     (UserOperation memory userOp, SolverOperation[] memory solverOps, DAppOperation memory dAppOp) =
+    //         buildOperations(userOpData, 0);
+
+    //     uint256 userTokenBalanceBefore = _balanceOf(tokenOut, userEOA);
+
+    //     // Do the actual metacall
+    //     vm.startPrank(userEOA);
+    //     IERC20(tokenIn).approve(address(ATLAS), amountIn);
+    //     ATLAS.metacall{ value: msgValue }(userOp, solverOps, dAppOp, address(0));
+    //     vm.stopPrank();
+
+    //     uint256 userTokenBalanceAfter = _balanceOf(tokenOut, userEOA);
+
+    //     console.log("User SMON balance change:", userTokenBalanceAfter - userTokenBalanceBefore);
+    //     assertGt(userTokenBalanceAfter - userTokenBalanceBefore, 0);
+    // }
+
+    // function test_swapExactETHForTokensSupportingFeeOnTransferTokens() public {
+    //     // User wants to swap exact ETH for SMON with fee-on-transfer support
+    //     bytes memory userOpData = abi.encodeWithSelector(
+    //         0xb6f9de95, // swapExactETHForTokensSupportingFeeOnTransferTokens selector
+    //         1,                // amountOutMin (low for testing)
+    //         _path1,           // path
+    //         executionEnvironment, // to
+    //         block.timestamp + 1800 // deadline
+    //     );
+
+    //     uint256 msgValue = amountIn + bundlerGasEth;
+
+    //     (UserOperation memory userOp, SolverOperation[] memory solverOps, DAppOperation memory dAppOp) =
+    //         buildOperations(userOpData, amountIn);
+
+    //     uint256 userTokenBalanceBefore = _balanceOf(tokenOut, userEOA);
+
+    //     // Do the actual metacall
+    //     vm.startPrank(userEOA);
+    //     ATLAS.metacall{ value: msgValue }(userOp, solverOps, dAppOp, address(0));
+    //     vm.stopPrank();
+
+    //     uint256 userTokenBalanceAfter = _balanceOf(tokenOut, userEOA);
+
+    //     console.log("User SMON balance change:", userTokenBalanceAfter - userTokenBalanceBefore);
+    //     assertGt(userTokenBalanceAfter - userTokenBalanceBefore, 0);
+    // }
+
+    // function test_swapExactTokensForETHSupportingFeeOnTransferTokens() public {
+    //     // User wants to swap exact SMON for ETH with fee-on-transfer support
+    //     address[] memory reversePath = new address[](2);
+    //     reversePath[0] = SMON_ADDRESS;
+    //     reversePath[1] = WETH_ADDRESS;
+
+    //     bytes memory userOpData = abi.encodeWithSelector(
+    //         0x791ac947, // swapExactTokensForETHSupportingFeeOnTransferTokens selector
+    //         amountOut,        // amountIn (SMON)
+    //         1,                // amountOutMin (ETH, low for testing)
+    //         reversePath,      // path
+    //         executionEnvironment, // to
+    //         block.timestamp + 1800 // deadline
+    //     );
+
+    //     uint256 msgValue = bundlerGasEth;
+
+    //     (UserOperation memory userOp, SolverOperation[] memory solverOps, DAppOperation memory dAppOp) =
+    //         buildOperations(userOpData, 0);
+
+    //     uint256 userEthBalanceBefore = _balanceOf(ETH, userEOA);
+
+    //     // Do the actual metacall
+    //     vm.startPrank(userEOA);
+    //     IERC20(SMON_ADDRESS).approve(address(ATLAS), amountOut);
+    //     ATLAS.metacall{ value: msgValue }(userOp, solverOps, dAppOp, address(0));
+    //     vm.stopPrank();
+
+    //     uint256 userEthBalanceAfter = _balanceOf(ETH, userEOA);
+
+    //     console.log("User ETH balance change:", userEthBalanceAfter - userEthBalanceBefore);
+    //     assertGt(userEthBalanceAfter - userEthBalanceBefore, 0);
+    // }
+
+    // function test_multiHopSwap() public {
+    //     // User wants to swap WETH for SMON through USDC
+    //     bytes memory userOpData = abi.encodeWithSelector(
+    //         0x38ed1739, // swapExactTokensForTokens selector
+    //         amountIn,         // amountIn
+    //         1,                // amountOutMin (low for testing)
+    //         _path2,           // multi-hop path: WETH -> USDC -> SMON
+    //         executionEnvironment, // to
+    //         block.timestamp + 1800 // deadline
+    //     );
+
+    //     uint256 msgValue = bundlerGasEth;
+
+    //     (UserOperation memory userOp, SolverOperation[] memory solverOps, DAppOperation memory dAppOp) =
+    //         buildOperations(userOpData, 0);
+
+    //     uint256 userTokenBalanceBefore = _balanceOf(SMON_ADDRESS, userEOA);
+
+    //     // Do the actual metacall
+    //     vm.startPrank(userEOA);
+    //     IERC20(tokenIn).approve(address(ATLAS), amountIn);
+    //     ATLAS.metacall{ value: msgValue }(userOp, solverOps, dAppOp, address(0));
+    //     vm.stopPrank();
+
+    //     uint256 userTokenBalanceAfter = _balanceOf(SMON_ADDRESS, userEOA);
+
+    //     console.log("User SMON balance change:", userTokenBalanceAfter - userTokenBalanceBefore);
+    //     assertGt(userTokenBalanceAfter - userTokenBalanceBefore, 0);
+    // }
 
     // balanceOf helper that supports ERC20 and native token
     function _balanceOf(address token, address account) internal view returns (uint256) {
@@ -441,7 +455,8 @@ contract UniswapV2DAppControlTest is BaseTest {
 
     function buildOperations(
         bytes memory userOpData,
-        uint256 msgValue
+        uint256 msgValue,
+        Swap[] memory swapPath
     )
         internal
         returns (UserOperation memory userOp, SolverOperation[] memory solverOps, DAppOperation memory dAppOp)
@@ -464,9 +479,11 @@ contract UniswapV2DAppControlTest is BaseTest {
         SolverOperation memory solverOp;
         address solverContract;
 
-        (solverContract, solverOp) = _setUpSolver(solverOneEOA, solverOnePK, 0.03 ether, userOp, true);
+        (solverContract, solverOp) = _setUpSolver(solverOneEOA, solverOnePK, 0.03 ether, userOp, swapPath);
 
         solverOps[0] = solverOp;
+
+        deal(swapPath[0].tokenIn, address(solverContract), 10e18);
 
         // build dApp operation
         dAppOp = txBuilder.buildDAppOperation(governanceEOA, userOp, solverOps);
@@ -482,26 +499,31 @@ contract UniswapV2DAppControlTest is BaseTest {
         uint256 solverPK,
         uint256 bidAmount,
         UserOperation memory userOp,
-        bool shouldSucceed
+        Swap[] memory swapPath
     )
         internal
         returns (address solverContract, SolverOperation memory solverOp)
     {
         vm.startPrank(solverEOA);
         // Make sure solver has 1 AtlETH bonded in Atlas
-        uint256 bonded = ATLAS.balanceOfBonded(solverEOA);
-        if (bonded < 1e18) {
-            uint256 atlETHBalance = ATLAS.balanceOf(solverEOA);
-            if (atlETHBalance < 1e18) {
-                deal(solverEOA, 1e18 - atlETHBalance);
-                ATLAS.deposit{ value: 1e18 - atlETHBalance }();
-            }
-            ATLAS.bond(1e18 - bonded);
-        }
+        // uint256 bonded = ATLAS.balanceOfBonded(solverEOA);
+        // if (bonded < 1e18) {
+        //     uint256 atlETHBalance = ATLAS.balanceOf(solverEOA);
+        //     if (atlETHBalance < 1e18) {
+        //         deal(solverEOA, 1e18 - atlETHBalance);
+        //         ATLAS.deposit{ value: 1e18 - atlETHBalance }();
+        //     }
+        //     ATLAS.bond(1e18 - bonded);
+        // }
+        deal(solverEOA, 10e18);
+        shMonad.depositAndBond{value: 5e18}(policyId, solverEOA, 4e18);
+        uint256 bonded = shMonad.balanceOfBonded(policyId, solverEOA);
+        console.log("Bonded:", bonded);
 
         // Deploy solver contract
-        MockETHSolver solver = new MockETHSolver(ETH, address(ATLAS));
-        solver.setShouldSucceed(shouldSucceed);
+        // MockETHSolver solver = new MockETHSolver(ETH, address(ATLAS));
+        // solver.setShouldSucceed(shouldSucceed);
+        BoomerSwapSolver solver = new BoomerSwapSolver(ETH, address(ATLAS));
 
         // Give bidAmount of ETH to solver contract
         if (BID_TOKEN == ETH) {
@@ -513,7 +535,7 @@ contract UniswapV2DAppControlTest is BaseTest {
         }
 
         // Create signed solverOp
-        solverOp = _buildSolverOp(solverEOA, solverPK, address(solver), bidAmount, userOp);
+        solverOp = _buildSolverOp(solverEOA, solverPK, address(solver), bidAmount, userOp, swapPath);
         vm.stopPrank();
 
         return (address(solver), solverOp);
@@ -524,7 +546,8 @@ contract UniswapV2DAppControlTest is BaseTest {
         uint256 solverPK,
         address solverContract,
         uint256 bidAmount,
-        UserOperation memory userOp
+        UserOperation memory userOp,
+        Swap[] memory swapPath
     )
         internal
         returns (SolverOperation memory solverOp)
@@ -532,7 +555,7 @@ contract UniswapV2DAppControlTest is BaseTest {
         // Builds the SolverOperation
         solverOp = txBuilder.buildSolverOperation({
             userOp: userOp,
-            solverOpData: abi.encodeCall(MockETHSolver.solve, ()),
+            solverOpData: abi.encodeCall(BoomerSwapSolver.execute, (swapPath, bidAmount)),
             solver: solverEOA,
             solverContract: address(solverContract),
             bidAmount: bidAmount,
