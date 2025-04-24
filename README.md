@@ -1,73 +1,29 @@
-## Atlas UniswapV3
+# Atlas DEX Backrun Module
 
-Run uniswapv3 mainnet tests:
-```
-forge test test/UniswapV3DAppControl.t.sol --rpc-url <BASE_MAINNET_RPC_URL>
-```
+## Instal Dependencies
 
-## Foundry
-
-**Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**
-
-Foundry consists of:
-
--   **Forge**: Ethereum testing framework (like Truffle, Hardhat and DappTools).
--   **Cast**: Swiss army knife for interacting with EVM smart contracts, sending transactions and getting chain data.
--   **Anvil**: Local Ethereum node, akin to Ganache, Hardhat Network.
--   **Chisel**: Fast, utilitarian, and verbose solidity REPL.
-
-## Documentation
-
-https://book.getfoundry.sh/
-
-## Usage
-
-### Build
-
-```shell
-$ forge build
+```bash
+forge install
 ```
 
-### Test
+## Run tests
 
-```shell
-$ forge test
+Tests must be ran on Base mainnet.
+
+```bash
+forge test --rpc-url <BASE_MAINNET_RPC_URL>
 ```
 
-### Format
+## Deploy modules
 
-```shell
-$ forge fmt
-```
+Create a `.env` file, patterned after `.env.example`. Fill in the values.
 
-### Gas Snapshots
+Run the following commands to deploy the dApp controls.
 
-```shell
-$ forge snapshot
-```
+```bash
+# For UniswapV2DAppControl
+npm run deploy-uniswap-v2-module
 
-### Anvil
-
-```shell
-$ anvil
-```
-
-### Deploy
-
-```shell
-$ forge script script/Counter.s.sol:CounterScript --rpc-url <your_rpc_url> --private-key <your_private_key>
-```
-
-### Cast
-
-```shell
-$ cast <subcommand>
-```
-
-### Help
-
-```shell
-$ forge --help
-$ anvil --help
-$ cast --help
+# For UniswapV3DAppControl
+npm run deploy-uniswap-v3-module
 ```
