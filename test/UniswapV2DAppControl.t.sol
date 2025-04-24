@@ -17,7 +17,7 @@ import { UniswapV2DAppControl, SwapTokenInfo } from "../src/UniswapV2DAppControl
 import { IUniswapV2Router02 } from "../src/interfaces/IUniswapV2Router.sol";
 import { IUniswapV2Pair } from "../src/interfaces/IUniswapV2Pair.sol";
 import { IUniswapV2Factory } from "../src/interfaces/IUniswapV2Factory.sol";
-import { IERC20 } from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import { SwapMath } from "../src/SwapMath.sol";
 
@@ -64,14 +64,15 @@ contract UniswapV2DAppControlTest is BaseTest {
 
     function setUp() public virtual override {
         __createAndLabelAccounts();
-        
+
         // Create governance
         governancePK = 11_112;
         governanceEOA = vm.addr(governancePK);
 
         // Deploy the control contract
         vm.startPrank(governanceEOA);
-        control = new UniswapV2DAppControl(address(ATLAS), ETH, governanceEOA, 5000, 0.005 ether); //50% gov payout
+        control = new UniswapV2DAppControl(address(ATLAS), SWAP_ROUTER, ETH, governanceEOA, 5000, 0.005 ether); //50%
+            // gov payout
         ATLAS_VERIFICATION.initializeGovernance(address(control));
         vm.stopPrank();
 
@@ -105,7 +106,7 @@ contract UniswapV2DAppControlTest is BaseTest {
         deal(tokenIn, userEOA, 10 ether);
         deal(tokenOut, userEOA, 10 ether);
 
-            // Add funding for governance
+        // Add funding for governance
         deal(governanceEOA, 2e18);
         vm.startPrank(governanceEOA);
         ATLAS.deposit{ value: 1e18 }();
@@ -117,9 +118,9 @@ contract UniswapV2DAppControlTest is BaseTest {
         // User wants to swap exact WETH for SMON
         bytes memory userOpData = abi.encodeWithSelector(
             0x38ed1739, // swapExactTokensForTokens selector
-            amountIn,         // amountIn
-            1,                // amountOutMin (low for testing)
-            _path1,           // path
+            amountIn, // amountIn
+            1, // amountOutMin (low for testing)
+            _path1, // path
             executionEnvironment, // to
             block.timestamp + 1800 // deadline
         );
@@ -130,14 +131,14 @@ contract UniswapV2DAppControlTest is BaseTest {
             buildOperations(userOpData, 0);
 
         uint256 userTokenBalanceBefore = _balanceOf(tokenOut, userEOA);
-        
+
         // Do the actual metacall
         vm.startPrank(userEOA);
         IERC20(tokenIn).approve(address(ATLAS), amountIn);
-        
+
         // Use try/catch to get error details
         ATLAS.metacall{ value: msgValue }(userOp, solverOps, dAppOp, address(0));
-        
+
         vm.stopPrank();
 
         uint256 userTokenBalanceAfter = _balanceOf(tokenOut, userEOA);
@@ -150,9 +151,9 @@ contract UniswapV2DAppControlTest is BaseTest {
         // User wants exact SMON for WETH
         bytes memory userOpData = abi.encodeWithSelector(
             0x8803dbee, // swapTokensForExactTokens selector
-            amountOut,        // amountOut
-            amountInMax,      // amountInMax
-            _path1,           // path
+            amountOut, // amountOut
+            amountInMax, // amountInMax
+            _path1, // path
             executionEnvironment, // to
             block.timestamp + 1800 // deadline
         );
@@ -180,8 +181,8 @@ contract UniswapV2DAppControlTest is BaseTest {
         // User wants to swap exact ETH for SMON
         bytes memory userOpData = abi.encodeWithSelector(
             0x7ff36ab5, // swapExactETHForTokens selector
-            1,                // amountOutMin (low for testing)
-            _path1,           // path
+            1, // amountOutMin (low for testing)
+            _path1, // path
             executionEnvironment, // to
             block.timestamp + 1800 // deadline
         );
@@ -207,8 +208,9 @@ contract UniswapV2DAppControlTest is BaseTest {
     function test_swapTokensForExactETH() public {
         uint256 reserves0;
         uint256 reserves1;
-        (reserves0, reserves1, ) = IUniswapV2Pair(IUniswapV2Factory(FACTORY).getPair(WETH_ADDRESS, SMON_ADDRESS)).getReserves();
-        uint256 amountIn = SwapMath.getAmountIn(amountOut, reserves1, reserves0);
+        (reserves0, reserves1,) =
+            IUniswapV2Pair(IUniswapV2Factory(FACTORY).getPair(WETH_ADDRESS, SMON_ADDRESS)).getReserves();
+        amountIn = SwapMath.getAmountIn(amountOut, reserves1, reserves0);
         // User wants exact ETH for SMON
         address[] memory reversePath = new address[](2);
         reversePath[0] = SMON_ADDRESS;
@@ -216,9 +218,9 @@ contract UniswapV2DAppControlTest is BaseTest {
 
         bytes memory userOpData = abi.encodeWithSelector(
             0x4a25d94a, // swapTokensForExactETH selector
-            amountOut,        // amountOut (ETH)
-            amountIn,        // amountInMax (SMON)
-            reversePath,      // path
+            amountOut, // amountOut (ETH)
+            amountIn, // amountInMax (SMON)
+            reversePath, // path
             executionEnvironment, // to
             block.timestamp + 1800 // deadline
         );
@@ -250,9 +252,9 @@ contract UniswapV2DAppControlTest is BaseTest {
 
         bytes memory userOpData = abi.encodeWithSelector(
             0x18cbafe5, // swapExactTokensForETH selector
-            amountOut,        // amountIn (SMON)
-            1,                // amountOutMin (ETH, low for testing)
-            reversePath,      // path
+            amountOut, // amountIn (SMON)
+            1, // amountOutMin (ETH, low for testing)
+            reversePath, // path
             executionEnvironment, // to
             block.timestamp + 1800 // deadline
         );
@@ -279,13 +281,14 @@ contract UniswapV2DAppControlTest is BaseTest {
     function test_swapETHForExactTokens() public {
         uint256 reserves0;
         uint256 reserves1;
-        (reserves0, reserves1, ) = IUniswapV2Pair(IUniswapV2Factory(FACTORY).getPair(WETH_ADDRESS, SMON_ADDRESS)).getReserves();
-        uint256 amountIn = SwapMath.getAmountIn(amountOut, reserves0, reserves1);
+        (reserves0, reserves1,) =
+            IUniswapV2Pair(IUniswapV2Factory(FACTORY).getPair(WETH_ADDRESS, SMON_ADDRESS)).getReserves();
+        amountIn = SwapMath.getAmountIn(amountOut, reserves0, reserves1);
         // User wants exact SMON for ETH
         bytes memory userOpData = abi.encodeWithSelector(
             0xfb3bdb41, // swapETHForExactTokens selector
-            amountOut,        // amountOut (SMON)
-            _path1,           // path
+            amountOut, // amountOut (SMON)
+            _path1, // path
             executionEnvironment, // to
             block.timestamp + 1800 // deadline
         );
@@ -312,9 +315,9 @@ contract UniswapV2DAppControlTest is BaseTest {
         // User wants to swap exact WETH for SMON with fee-on-transfer support
         bytes memory userOpData = abi.encodeWithSelector(
             0x5c11d795, // swapExactTokensForTokensSupportingFeeOnTransferTokens selector
-            amountIn,         // amountIn
-            1,                // amountOutMin (low for testing)
-            _path1,           // path
+            amountIn, // amountIn
+            1, // amountOutMin (low for testing)
+            _path1, // path
             executionEnvironment, // to
             block.timestamp + 1800 // deadline
         );
@@ -342,8 +345,8 @@ contract UniswapV2DAppControlTest is BaseTest {
         // User wants to swap exact ETH for SMON with fee-on-transfer support
         bytes memory userOpData = abi.encodeWithSelector(
             0xb6f9de95, // swapExactETHForTokensSupportingFeeOnTransferTokens selector
-            1,                // amountOutMin (low for testing)
-            _path1,           // path
+            1, // amountOutMin (low for testing)
+            _path1, // path
             executionEnvironment, // to
             block.timestamp + 1800 // deadline
         );
@@ -374,9 +377,9 @@ contract UniswapV2DAppControlTest is BaseTest {
 
         bytes memory userOpData = abi.encodeWithSelector(
             0x791ac947, // swapExactTokensForETHSupportingFeeOnTransferTokens selector
-            amountOut,        // amountIn (SMON)
-            1,                // amountOutMin (ETH, low for testing)
-            reversePath,      // path
+            amountOut, // amountIn (SMON)
+            1, // amountOutMin (ETH, low for testing)
+            reversePath, // path
             executionEnvironment, // to
             block.timestamp + 1800 // deadline
         );
@@ -404,9 +407,9 @@ contract UniswapV2DAppControlTest is BaseTest {
         // User wants to swap WETH for SMON through USDC
         bytes memory userOpData = abi.encodeWithSelector(
             0x38ed1739, // swapExactTokensForTokens selector
-            amountIn,         // amountIn
-            1,                // amountOutMin (low for testing)
-            _path2,           // multi-hop path: WETH -> USDC -> SMON
+            amountIn, // amountIn
+            1, // amountOutMin (low for testing)
+            _path2, // multi-hop path: WETH -> USDC -> SMON
             executionEnvironment, // to
             block.timestamp + 1800 // deadline
         );

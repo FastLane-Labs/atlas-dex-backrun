@@ -1,9 +1,10 @@
 {
-  "name": "atlas-baseswap",
+  "name": "atlas-dex-backrun",
   "version": "1.0.0",
-  "repository": "https://github.com/FastLane-Labs/atlas-baseswap",
+  "repository": "https://github.com/FastLane-Labs/atlas-dex-backrun",
   "author": "FastLane",
   "scripts": {
-    "deploy-base-sepolia": "source .env && forge script script/deploy_sepolia.s.sol:DeployBaseSwapSepoliaDAppControlScript --rpc-url ${BASE_SEPOLIA_RPC_URL} --broadcast --etherscan-api-key ${BASESCAN_API_KEY} --verify --delay 30"
+    "deploy-uniswap-v2-module": "source .env && forge script script/deploy_v2.s.sol:DeployUniswapV2DAppControlScript --rpc-url ${RPC_URL} --broadcast --etherscan-api-key ${ETHERSCAN_API_KEY} --verify --delay 30",
+    "deploy-uniswap-v3-module": "source .env && forge script script/deploy_v3.s.sol:DeployUniswapV3DAppControlScript --rpc-url ${RPC_URL} --broadcast --etherscan-api-key ${ETHERSCAN_API_KEY} --verify --delay 30"
   }
 }

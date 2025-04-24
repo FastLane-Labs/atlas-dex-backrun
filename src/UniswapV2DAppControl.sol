@@ -2,7 +2,7 @@
 pragma solidity 0.8.28;
 
 import { SafeTransferLib } from "solady/utils/SafeTransferLib.sol";
-import { IERC20 } from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import { DAppControl } from "@atlas/dapp/DAppControl.sol";
 import { CallConfig } from "@atlas/types/ConfigTypes.sol";
@@ -14,8 +14,6 @@ import { IUniswapV2Pair } from "./interfaces/IUniswapV2Pair.sol";
 import { IUniswapV2Factory } from "./interfaces/IUniswapV2Factory.sol";
 import { SwapMath } from "./SwapMath.sol";
 
-import "forge-std/Test.sol";
-
 struct SwapTokenInfo {
     address inputToken;
     uint256 inputAmount;
@@ -25,12 +23,9 @@ struct SwapTokenInfo {
 }
 
 contract UniswapV2DAppControl is DAppControl {
-    // Uniswap V2 Router address (Mainnet)
-    address public constant SWAP_ROUTER = 0xCa810D095e90Daae6e867c19DF6D9A8C56db2c89;
     uint256 public constant PERCENTAGE_DENOMINATOR = 10_000; //basis points denominator
     uint32 public constant SOLVER_GAS_LIMIT = 5_000_000;
     address internal constant _ETH = address(0); // address of the ETH token
-    address internal constant WETH = 0x760AfE86e5de5fa0Ee542fc7B7B713e1c5425701;
 
     // Function selectors for Uniswap V2 Router
     bytes4 private constant SWAP_EXACT_TOKENS_FOR_TOKENS = 0x38ed1739;
@@ -42,6 +37,8 @@ contract UniswapV2DAppControl is DAppControl {
     bytes4 private constant SWAP_EXACT_TOKENS_FOR_TOKENS_SUPPORTING_FEE = 0x5c11d795;
     bytes4 private constant SWAP_EXACT_ETH_FOR_TOKENS_SUPPORTING_FEE = 0xb6f9de95;
     bytes4 private constant SWAP_EXACT_TOKENS_FOR_ETH_SUPPORTING_FEE = 0x791ac947;
+
+    address public immutable swapRouter;
 
     uint256 public govPercent;
     uint256 public minBidThreshold;
@@ -71,6 +68,7 @@ contract UniswapV2DAppControl is DAppControl {
     /**
      * @notice Constructor for UniswapV2DAppControl
      *     @param _atlas The address of the Atlas contract
+     *     @param _swapRouter The address of the UniswapV2 Router contract
      *     @param _bidToken The address of the bid token (address(0) for ETH)
      *     @param _govPayoutAddr The address of the governance payout address
      *     @param _govPercent The percentage of the bid amount that goes to the governance payout address
@@ -78,6 +76,7 @@ contract UniswapV2DAppControl is DAppControl {
      */
     constructor(
         address _atlas,
+        address _swapRouter,
         address _bidToken,
         address _govPayoutAddr,
         uint256 _govPercent,
@@ -111,6 +110,7 @@ contract UniswapV2DAppControl is DAppControl {
             })
         )
     {
+        swapRouter = _swapRouter;
         // Set bidToken to constant ETH if zero address
         bidToken = _bidToken == _ETH ? _ETH : _bidToken;
         minBidThreshold = _minBidThreshold;
@@ -180,7 +180,7 @@ contract UniswapV2DAppControl is DAppControl {
     // ---------------------------------------------------- //
 
     function _preOpsCall(UserOperation calldata userOp) internal virtual override returns (bytes memory) {
-        if (userOp.dapp != SWAP_ROUTER) revert UserOpDappNotSwapRouter();
+        if (userOp.dapp != swapRouter) revert UserOpDappNotSwapRouter();
 
         (bool success, bytes memory swapData) =
             CONTROL.staticcall(abi.encodeWithSelector(this.decodeUserOpData.selector, userOp.data));
@@ -203,7 +203,6 @@ contract UniswapV2DAppControl is DAppControl {
     }
 
     function _allocateValueCall(address _bidToken, uint256 bidAmount, bytes calldata data) internal virtual override {
-        
         {
             // Check if the solver bid is below the minimum threshold simulated mode only
             if (_simulation()) {
@@ -329,13 +328,14 @@ contract UniswapV2DAppControl is DAppControl {
         swapTokenInfo.unwrapWETH = false;
 
         if (funcSelector == SWAP_EXACT_TOKENS_FOR_TOKENS) {
-            // swapExactTokensForTokens(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline)
+            // swapExactTokensForTokens(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint
+            // deadline)
             (
                 uint256 amountIn,
                 uint256 amountOutMin,
                 address[] memory path,
-                ,  // address to - unused
-                   // uint deadline - unused
+                , // address to - unused
+                    // uint deadline - unused
             ) = abi.decode(userData[4:], (uint256, uint256, address[], address, uint256));
 
             swapTokenInfo.inputToken = path[0];
@@ -343,13 +343,14 @@ contract UniswapV2DAppControl is DAppControl {
             swapTokenInfo.inputAmount = amountIn;
             swapTokenInfo.outputMin = amountOutMin;
         } else if (funcSelector == SWAP_TOKENS_FOR_EXACT_TOKENS) {
-            // swapTokensForExactTokens(uint amountOut, uint amountInMax, address[] calldata path, address to, uint deadline)
+            // swapTokensForExactTokens(uint amountOut, uint amountInMax, address[] calldata path, address to, uint
+            // deadline)
             (
                 uint256 amountOut,
                 uint256 amountInMax,
                 address[] memory path,
-                ,  // address to - unused
-                   // uint deadline - unused
+                , // address to - unused
+                    // uint deadline - unused
             ) = abi.decode(userData[4:], (uint256, uint256, address[], address, uint256));
 
             swapTokenInfo.inputToken = path[0];
@@ -361,8 +362,8 @@ contract UniswapV2DAppControl is DAppControl {
             (
                 uint256 amountOutMin,
                 address[] memory path,
-                ,  // address to - unused
-                   // uint deadline - unused
+                , // address to - unused
+                    // uint deadline - unused
             ) = abi.decode(userData[4:], (uint256, address[], address, uint256));
 
             swapTokenInfo.inputToken = _ETH;
@@ -370,13 +371,14 @@ contract UniswapV2DAppControl is DAppControl {
             swapTokenInfo.inputAmount = 0; // Set in preOps from userOp.value
             swapTokenInfo.outputMin = amountOutMin;
         } else if (funcSelector == SWAP_TOKENS_FOR_EXACT_ETH) {
-            // swapTokensForExactETH(uint amountOut, uint amountInMax, address[] calldata path, address to, uint deadline)
+            // swapTokensForExactETH(uint amountOut, uint amountInMax, address[] calldata path, address to, uint
+            // deadline)
             (
                 uint256 amountOut,
                 uint256 amountInMax,
                 address[] memory path,
-                ,  // address to - unused
-                   // uint deadline - unused
+                , // address to - unused
+                    // uint deadline - unused
             ) = abi.decode(userData[4:], (uint256, uint256, address[], address, uint256));
 
             swapTokenInfo.inputToken = path[0];
@@ -385,13 +387,14 @@ contract UniswapV2DAppControl is DAppControl {
             swapTokenInfo.outputMin = amountOut;
             swapTokenInfo.unwrapWETH = true;
         } else if (funcSelector == SWAP_EXACT_TOKENS_FOR_ETH) {
-            // swapExactTokensForETH(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline)
+            // swapExactTokensForETH(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint
+            // deadline)
             (
                 uint256 amountIn,
                 uint256 amountOutMin,
                 address[] memory path,
-                ,  // address to - unused
-                   // uint deadline - unused
+                , // address to - unused
+                    // uint deadline - unused
             ) = abi.decode(userData[4:], (uint256, uint256, address[], address, uint256));
 
             swapTokenInfo.inputToken = path[0];
@@ -404,8 +407,8 @@ contract UniswapV2DAppControl is DAppControl {
             (
                 uint256 amountOut,
                 address[] memory path,
-                ,  // address to - unused
-                   // uint deadline - unused
+                , // address to - unused
+                    // uint deadline - unused
             ) = abi.decode(userData[4:], (uint256, address[], address, uint256));
 
             swapTokenInfo.inputToken = _ETH;
@@ -413,13 +416,14 @@ contract UniswapV2DAppControl is DAppControl {
             swapTokenInfo.inputAmount = 0; // Set in preOps from userOp.value
             swapTokenInfo.outputMin = amountOut;
         } else if (funcSelector == SWAP_EXACT_TOKENS_FOR_TOKENS_SUPPORTING_FEE) {
-            // swapExactTokensForTokensSupportingFeeOnTransferTokens(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline)
+            // swapExactTokensForTokensSupportingFeeOnTransferTokens(uint amountIn, uint amountOutMin, address[]
+            // calldata path, address to, uint deadline)
             (
                 uint256 amountIn,
                 uint256 amountOutMin,
                 address[] memory path,
-                ,  // address to - unused
-                   // uint deadline - unused
+                , // address to - unused
+                    // uint deadline - unused
             ) = abi.decode(userData[4:], (uint256, uint256, address[], address, uint256));
 
             swapTokenInfo.inputToken = path[0];
@@ -427,12 +431,13 @@ contract UniswapV2DAppControl is DAppControl {
             swapTokenInfo.inputAmount = amountIn;
             swapTokenInfo.outputMin = amountOutMin;
         } else if (funcSelector == SWAP_EXACT_ETH_FOR_TOKENS_SUPPORTING_FEE) {
-            // swapExactETHForTokensSupportingFeeOnTransferTokens(uint amountOutMin, address[] calldata path, address to, uint deadline)
+            // swapExactETHForTokensSupportingFeeOnTransferTokens(uint amountOutMin, address[] calldata path, address
+            // to, uint deadline)
             (
                 uint256 amountOutMin,
                 address[] memory path,
-                ,  // address to - unused
-                   // uint deadline - unused
+                , // address to - unused
+                    // uint deadline - unused
             ) = abi.decode(userData[4:], (uint256, address[], address, uint256));
 
             swapTokenInfo.inputToken = _ETH;
@@ -440,13 +445,14 @@ contract UniswapV2DAppControl is DAppControl {
             swapTokenInfo.inputAmount = 0; // Set in preOps from userOp.value
             swapTokenInfo.outputMin = amountOutMin;
         } else if (funcSelector == SWAP_EXACT_TOKENS_FOR_ETH_SUPPORTING_FEE) {
-            // swapExactTokensForETHSupportingFeeOnTransferTokens(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline)
+            // swapExactTokensForETHSupportingFeeOnTransferTokens(uint amountIn, uint amountOutMin, address[] calldata
+            // path, address to, uint deadline)
             (
                 uint256 amountIn,
                 uint256 amountOutMin,
                 address[] memory path,
-                ,  // address to - unused
-                   // uint deadline - unused
+                , // address to - unused
+                    // uint deadline - unused
             ) = abi.decode(userData[4:], (uint256, uint256, address[], address, uint256));
 
             swapTokenInfo.inputToken = path[0];

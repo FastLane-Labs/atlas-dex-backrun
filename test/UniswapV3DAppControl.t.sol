@@ -67,7 +67,8 @@ contract UniswapV3DAppControlTest is BaseTest {
         governanceEOA = vm.addr(governancePK);
 
         vm.startPrank(governanceEOA);
-        control = new UniswapV3DAppControl(address(atlas), ETH, governanceEOA, 5000, 0.005 ether); //50% gov payout
+        control = new UniswapV3DAppControl(address(atlas), SWAP_ROUTER, ETH, governanceEOA, 5000, 0.005 ether); //50%
+            // gov payout
         atlasVerification.initializeGovernance(address(control));
         vm.stopPrank();
 

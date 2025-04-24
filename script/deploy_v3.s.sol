@@ -7,26 +7,34 @@ import "forge-std/Test.sol";
 import { UniswapV3DAppControl } from "src/UniswapV3DAppControl.sol";
 import { AtlasVerification } from "@atlas/atlas/AtlasVerification.sol";
 
-contract DeployBaseSwapDAppControlScript is Test {
+contract DeployUniswapV3DAppControlScript is Test {
     function run() external {
         console.log("\n=== DEPLOYING UniswapV3 DAPP CONTROL ===\n");
 
-        uint256 deployerPrivateKey = vm.envUint("GOV_PRIVATE_KEY");
+        uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
+        address routerAddress = vm.envAddress("ROUTER_ADDRESS");
+        address bidToken = vm.envAddress("BID_TOKEN");
+        address dAppPayoutAddress = vm.envAddress("DAPP_PAYOUT_ADDRESS");
+        uint256 dAppPayoutShare = vm.envUint("DAPP_PAYOUT_SHARE");
+        uint256 minBid = vm.envUint("MIN_BID");
+        address atlasAddress = vm.envAddress("ATLAS_ADDRESS");
+        address atlasVerificationAddress = vm.envAddress("ATLAS_VERIFICATION_ADDRESS");
+
+        require(routerAddress != address(0), "ROUTER_ADDRESS is not set");
+        require(dAppPayoutAddress != address(0), "DAPP_PAYOUT_ADDRESS is not set");
+        require(atlasAddress != address(0), "ATLAS_ADDRESS is not set");
+        require(atlasVerificationAddress != address(0), "ATLAS_VERIFICATION_ADDRESS is not set");
+
         address deployer = vm.addr(deployerPrivateKey);
 
         console.log("Deployer address: \t\t\t\t", deployer);
-
-        address atlasAddress = vm.envAddress("ATLAS_ADDRESS");
-        address atlasVerificationAddress = vm.envAddress("ATLAS_VERIFICATION_ADDRESS");
-        address auctioneer = vm.envAddress("AUCTIONEER_ADDRESS");
-
-        require(atlasAddress != address(0), "ATLAS_ADDRESS is not set");
-        require(atlasVerificationAddress != address(0), "ATLAS_VERIFICATION_ADDRESS is not set");
-        require(auctioneer != address(0), "AUCTIONEER_ADDRESS is not set");
-
+        console.log("Using Router address: \t\t\t\t", routerAddress);
+        console.log("Using Bid token: \t\t\t\t", bidToken);
+        console.log("Using DApp payout address: \t\t\t", dAppPayoutAddress);
+        console.log("Using DApp payout share: \t\t\t", dAppPayoutShare);
+        console.log("Using Min Bid: \t\t\t\t", minBid);
         console.log("Using Atlas deployed at: \t\t\t", atlasAddress);
         console.log("Using Atlas Verification deployed at: \t", atlasVerificationAddress);
-        console.log("Adding Auctioneer as whitelisted signatory: \t", auctioneer);
         console.log("\n");
 
         console.log("Deploying from deployer Account...");
@@ -34,15 +42,15 @@ contract DeployBaseSwapDAppControlScript is Test {
         vm.startBroadcast(deployerPrivateKey);
 
         UniswapV3DAppControl uniswapV3DAppControl = new UniswapV3DAppControl(
-            atlasAddress, // Atlas
-            address(0), // Bid token, ETH
-            deployer, // Governance payout address
-            1000, // Governance percent (bps)
-            1e9 // Minimum bid threshold
+            atlasAddress,
+            routerAddress,
+            bidToken,
+            dAppPayoutAddress,
+            dAppPayoutShare, // bps
+            minBid // wei
         );
 
         AtlasVerification(atlasVerificationAddress).initializeGovernance(address(uniswapV3DAppControl));
-        AtlasVerification(atlasVerificationAddress).addSignatory(address(uniswapV3DAppControl), auctioneer);
 
         vm.stopBroadcast();
 

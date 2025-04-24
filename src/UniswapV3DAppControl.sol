@@ -2,7 +2,7 @@
 pragma solidity 0.8.28;
 
 import { SafeTransferLib } from "solady/utils/SafeTransferLib.sol";
-import { IERC20 } from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import { DAppControl } from "@atlas/dapp/DAppControl.sol";
 import { CallConfig } from "@atlas/types/ConfigTypes.sol";
@@ -10,8 +10,6 @@ import { UserOperation } from "@atlas/types/UserOperation.sol";
 import { SolverOperation } from "@atlas/types/SolverOperation.sol";
 
 import { ISwapRouter } from "./interfaces/ISwapRouter.sol";
-
-import "forge-std/Test.sol";
 
 struct SwapTokenInfo {
     address inputToken;
@@ -22,10 +20,11 @@ struct SwapTokenInfo {
 }
 
 contract UniswapV3DAppControl is DAppControl {
-    address public constant SWAP_ROUTER = 0x1B8eea9315bE495187D873DA7773a874545D9D48;
-    uint256 public constant PERCENTAGE_DENOMINATOR = 10_000; //basis points denominator
+    uint256 public constant PERCENTAGE_DENOMINATOR = 10_000; // basis points denominator
     uint32 public constant SOLVER_GAS_LIMIT = 5_000_000;
     address internal constant _ETH = address(0); // address of the ETH token
+
+    address public immutable swapRouter;
 
     uint256 public govPercent;
     uint256 public minBidThreshold;
@@ -55,6 +54,7 @@ contract UniswapV3DAppControl is DAppControl {
     /**
      * @notice Constructor for UniswapV3DAppControl
      *     @param _atlas The address of the Atlas contract
+     *     @param _swapRouter The address of the UniswapV3 Router contract
      *     @param _bidToken The address of the bid token (address(0) for ETH)
      *     @param _govPayoutAddr The address of the governance payout address
      *     @param _govPercent The percentage of the bid amount that goes to the governance payout address
@@ -62,6 +62,7 @@ contract UniswapV3DAppControl is DAppControl {
      */
     constructor(
         address _atlas,
+        address _swapRouter,
         address _bidToken,
         address _govPayoutAddr,
         uint256 _govPercent,
@@ -95,6 +96,7 @@ contract UniswapV3DAppControl is DAppControl {
             })
         )
     {
+        swapRouter = _swapRouter;
         // Set bidToken to constant ETH if zero address
         bidToken = _bidToken == _ETH ? _ETH : _bidToken;
         minBidThreshold = _minBidThreshold;
@@ -164,7 +166,7 @@ contract UniswapV3DAppControl is DAppControl {
     // ---------------------------------------------------- //
 
     function _preOpsCall(UserOperation calldata userOp) internal virtual override returns (bytes memory) {
-        if (userOp.dapp != SWAP_ROUTER) revert UserOpDappNotSwapRouter();
+        if (userOp.dapp != swapRouter) revert UserOpDappNotSwapRouter();
 
         (bool success, bytes memory swapData) =
             CONTROL.staticcall(abi.encodeWithSelector(this.decodeUserOpData.selector, userOp.data));
