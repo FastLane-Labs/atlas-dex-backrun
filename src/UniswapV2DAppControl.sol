@@ -28,7 +28,8 @@ contract UniswapV2DAppControl is DAppControl {
     // Uniswap V2 Router address (Mainnet)
     address public constant SWAP_ROUTER = 0xCa810D095e90Daae6e867c19DF6D9A8C56db2c89;
     uint256 public constant PERCENTAGE_DENOMINATOR = 10_000; //basis points denominator
-    uint32 public constant SOLVER_GAS_LIMIT = 5_000_000;
+    uint32 public constant SOLVER_GAS_LIMIT = 1_000_000;
+    uint32 public constant DAPP_GAS_LIMIT = 500_000;
     address internal constant _ETH = address(0); // address of the ETH token
     address internal constant WETH = 0x760AfE86e5de5fa0Ee542fc7B7B713e1c5425701;
 
@@ -95,7 +96,7 @@ contract UniswapV2DAppControl is DAppControl {
                 delegateUser: false,
                 requirePreSolver: false,
                 requirePostSolver: false,
-                requirePostOps: true,
+                // requirePostOps: true,
                 zeroSolvers: true,
                 reuseUserOp: true,
                 userAuctioneer: false,
@@ -106,8 +107,8 @@ contract UniswapV2DAppControl is DAppControl {
                 requireFulfillment: false,
                 trustedOpHash: true,
                 invertBidValue: false,
-                exPostBids: true, // NOTE: allow solver to set bidAmount after onchain bid-finding
-                allowAllocateValueFailure: false
+                exPostBids: false // NOTE: allow solver to set bidAmount after onchain bid-finding
+                // allowAllocateValueFailure: false
             })
         )
     {
@@ -202,8 +203,7 @@ contract UniswapV2DAppControl is DAppControl {
         return swapData; // return SwapTokenInfo in bytes format, to be used in allocateValue.
     }
 
-    function _allocateValueCall(address _bidToken, uint256 bidAmount, bytes calldata data) internal virtual override {
-        
+    function _allocateValueCall(bool, address _bidToken, uint256 bidAmount, bytes calldata data) internal virtual override {
         {
             // Check if the solver bid is below the minimum threshold simulated mode only
             if (_simulation()) {
@@ -259,19 +259,6 @@ contract UniswapV2DAppControl is DAppControl {
         _transferUserTokens(_swapInfo, _outputTokenBalance, _inputTokenBalance);
     }
 
-    function _postOpsCall(bool solved, bytes calldata data) internal virtual override {
-        if (solved) return; // token distribution already handled in allocateValue hook
-
-        SwapTokenInfo memory _swapInfo = abi.decode(data, (SwapTokenInfo));
-        if (_swapInfo.unwrapWETH) _swapInfo.outputToken = _ETH;
-        uint256 _outputTokenBalance = _balanceOf(_swapInfo.outputToken);
-        uint256 _inputTokenBalance = _balanceOf(_swapInfo.inputToken);
-
-        if (_outputTokenBalance < _swapInfo.outputMin) revert InsufficientOutputBalance();
-
-        _transferUserTokens(_swapInfo, _outputTokenBalance, _inputTokenBalance);
-    }
-
     // ---------------------------------------------------- //
     //                 GETTERS AND HELPERS                  //
     // ---------------------------------------------------- //
@@ -286,6 +273,10 @@ contract UniswapV2DAppControl is DAppControl {
 
     function getSolverGasLimit() public view virtual override returns (uint32) {
         return SOLVER_GAS_LIMIT;
+    }
+
+    function getDAppGasLimit() public view virtual override returns (uint32) {
+        return DAPP_GAS_LIMIT;
     }
 
     function getPayoutData() public view returns (address, uint256) {

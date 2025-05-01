@@ -4,7 +4,7 @@
 [submodule "lib/atlas"]
 	path = lib/atlas
 	url = https://github.com/FastLane-Labs/atlas
-	branch = atlas-v1.3
+	branch = atlas-v1.5
 [submodule "lib/v3-periphery"]
 	path = lib/v3-periphery
 	url = https://github.com/uniswap/v3-periphery

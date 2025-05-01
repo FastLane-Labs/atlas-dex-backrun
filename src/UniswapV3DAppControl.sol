@@ -79,7 +79,6 @@ contract UniswapV3DAppControl is DAppControl {
                 delegateUser: false,
                 requirePreSolver: false,
                 requirePostSolver: false,
-                requirePostOps: true,
                 zeroSolvers: true,
                 reuseUserOp: true,
                 userAuctioneer: false,
@@ -90,8 +89,7 @@ contract UniswapV3DAppControl is DAppControl {
                 requireFulfillment: false,
                 trustedOpHash: true,
                 invertBidValue: false,
-                exPostBids: true, // NOTE: allow solver to set bidAmount after onchain bid-finding
-                allowAllocateValueFailure: false
+                exPostBids: true // NOTE: allow solver to set bidAmount after onchain bid-finding
             })
         )
     {
@@ -186,7 +184,7 @@ contract UniswapV3DAppControl is DAppControl {
         return swapData; // return SwapTokenInfo in bytes format, to be used in allocateValue.
     }
 
-    function _allocateValueCall(address _bidToken, uint256 bidAmount, bytes calldata data) internal virtual override {
+    function _allocateValueCall(bool, address _bidToken, uint256 bidAmount, bytes calldata data) internal virtual override {
         {
             // Check if the solver bid is below the minimum threshold simulated mode only
             if (_simulation()) {
@@ -235,19 +233,6 @@ contract UniswapV3DAppControl is DAppControl {
 
         // Note: Whenever bidToken overlaps with InputToken or OutputToken, the bidAmount should be excluded from the
         // refund calculations.
-        uint256 _outputTokenBalance = _balanceOf(_swapInfo.outputToken);
-        uint256 _inputTokenBalance = _balanceOf(_swapInfo.inputToken);
-
-        if (_outputTokenBalance < _swapInfo.outputMin) revert InsufficientOutputBalance();
-
-        _transferUserTokens(_swapInfo, _outputTokenBalance, _inputTokenBalance);
-    }
-
-    function _postOpsCall(bool solved, bytes calldata data) internal virtual override {
-        if (solved) return; // token distribution already handled in allocateValue hook
-
-        SwapTokenInfo memory _swapInfo = abi.decode(data, (SwapTokenInfo));
-        if (_swapInfo.unwrapWETH9) _swapInfo.outputToken = _ETH;
         uint256 _outputTokenBalance = _balanceOf(_swapInfo.outputToken);
         uint256 _inputTokenBalance = _balanceOf(_swapInfo.inputToken);
 

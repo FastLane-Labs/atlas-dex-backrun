@@ -4,9 +4,11 @@ pragma solidity 0.8.28;
 import { IUniswapV2Pair, IUniswapV3Pool, IUniswapV3Factory} from "./interfaces/IUniswap.sol";
 import { SafeTransferLib, ERC20 } from "solmate/utils/SafeTransferLib.sol";
 import { IAtlas } from "@atlas/interfaces/IAtlas.sol";
+import { IShMonad } from "./interfaces/IShMonad.sol";
 interface IWETH9 {
     function deposit() external payable;
     function withdraw(uint256 wad) external payable;
+    function balanceOf(address account) external view returns (uint256);
 }
 import { SolverBase } from "@atlas/solver/SolverBase.sol";
 import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
@@ -61,14 +63,21 @@ struct Swap {
 // ----------------------------------------------------------------------------
 
 contract BoomerSwapSolver is SolverBase, ReentrancyGuard {
+    IShMonad shmonad;
     constructor(
-        address weth,
-        address atlas
-    ) SolverBase(weth, atlas, msg.sender) {}
+        address _weth,
+        address _atlas,
+        address _shmonad
+    ) SolverBase(_weth, _atlas, msg.sender) {
+        shmonad = IShMonad(_shmonad);
+    }
 
     function execute(
         Swap[] calldata swapPath,
-        uint256 amountIn
+        uint256 amountIn,
+        uint256 bidAmount,
+        uint256 boostYieldPct
+
     ) external payable nonReentrant returns (uint256) {
         uint256 amount = amountIn;
         
@@ -84,7 +93,13 @@ contract BoomerSwapSolver is SolverBase, ReentrancyGuard {
             }
         }
 
-        require(amount >= amountIn, "amountOut < amountIn");
+        require(amount >= (amountIn + bidAmount), "amountOut < amountIn");
+
+        uint256 profit = amount - amountIn - bidAmount;
+        
+        uint256 boostYield = profit * boostYieldPct / 10000;
+        IWETH9(WETH_ADDRESS).withdraw(boostYield);
+        shmonad.boostYield{value: boostYield}();
         return amount;
     }
 
@@ -224,7 +239,7 @@ contract BoomerSwapSolver is SolverBase, ReentrancyGuard {
       int256 amount0Delta,
       int256 amount1Delta,
       bytes calldata _data
-    ) external {
+    ) external nonReentrant {
         // Decode the data to get the swap info and callback ID
         (Swap memory swap) = abi.decode(_data, (Swap));
         
@@ -250,7 +265,7 @@ contract BoomerSwapSolver is SolverBase, ReentrancyGuard {
       int256 amount0Delta,
       int256 amount1Delta,
       bytes calldata _data
-    ) external {
+    ) external nonReentrant {
         // Decode the data to get the swap info and callback ID
         (Swap memory swap) = abi.decode(_data, (Swap));
         

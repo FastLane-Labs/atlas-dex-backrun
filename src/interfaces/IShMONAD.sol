@@ -1,6 +1,9 @@
 //SPDX-License-Identifier: BUSL-1.1
 pragma solidity 0.8.28;
 
+import { IERC4626Custom } from "./IERC4626Custom.sol";
+import { IERC20Full } from "./IERC20Full.sol";
+
 import { Policy } from "../Types.sol";
 import { IERC4626Custom } from "./IERC4626Custom.sol";
 import { IERC20Full } from "./IERC20Full.sol";
@@ -362,4 +365,22 @@ interface IShMonad is IERC4626Custom, IERC20Full {
      * @return The unbonding balance in shares
      */
     function balanceOfUnbonding(uint64 policyID, address account) external view returns (uint256);
+
+    function policyBalanceAvailable(
+        uint64 policyID,
+        address account,
+        bool inUnderlying
+    )
+        external
+        view
+        returns (uint256 balanceAvailable);
+
+    function topUpAvailable(
+        uint64 policyID,
+        address account,
+        bool inUnderlying
+    )
+        external
+        view
+        returns (uint256 amountAvailable);
 }
