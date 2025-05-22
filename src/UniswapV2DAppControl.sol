@@ -105,7 +105,7 @@ contract UniswapV2DAppControl is DAppControl {
                 verifyCallChainHash: true,
                 forwardReturnData: true,
                 requireFulfillment: false,
-                trustedOpHash: true,
+                trustedOpHash: false,
                 invertBidValue: false,
                 exPostBids: false // NOTE: allow solver to set bidAmount after onchain bid-finding
                 // allowAllocateValueFailure: false

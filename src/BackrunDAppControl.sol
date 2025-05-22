@@ -48,6 +48,7 @@ contract BackrunDAppControl is DAppControl {
     error UserOpDappNotSwapRouter();
     error SwapFailed();
     error WrongBidToken();
+
     /**
      * @notice Constructor for UniswapV2DAppControl
      *     @param _atlas The address of the Atlas contract
@@ -79,7 +80,7 @@ contract BackrunDAppControl is DAppControl {
                 verifyCallChainHash: true,
                 forwardReturnData: true,
                 requireFulfillment: false,
-                trustedOpHash: true,
+                trustedOpHash: false,
                 invertBidValue: false,
                 exPostBids: false // NOTE: allow solver to set bidAmount after onchain bid-finding
                 // allowAllocateValueFailure: false
@@ -208,8 +209,9 @@ contract BackrunDAppControl is DAppControl {
 
         // Calculate governance and user amounts and split the bidAmount
         uint256 govPayoutAmount = (bidAmount * _govPercent) / PERCENTAGE_DENOMINATOR;
+        console.log("govPayoutAmount", govPayoutAmount);
         uint256 userAmount = _outputTokenBalance - govPayoutAmount;
-
+        console.log("userAmount", userAmount);
         // Transfer governance amount to payout address if not zero
         if (govPayoutAmount > 0) {
             if (_bidToken == _ETH) {
