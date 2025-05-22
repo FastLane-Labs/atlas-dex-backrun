@@ -11,8 +11,6 @@ import { SolverOperation } from "@atlas/types/SolverOperation.sol";
 
 import { SwapMath } from "./SwapMath.sol";
 
-import "forge-std/Test.sol";
-
 struct SwapTokenInfo {
     address inputToken;
     uint256 inputAmount;
@@ -23,9 +21,9 @@ struct SwapTokenInfo {
 }
 
 contract BackrunDAppControl is DAppControl {
-    uint256 public constant PERCENTAGE_DENOMINATOR = 10_000; //basis points denominator
-    uint32 public constant SOLVER_GAS_LIMIT = 1_000_000;
-    uint32 public constant DAPP_GAS_LIMIT = 500_000;
+    uint256 internal constant BPS_SCALE = 10_000; //basis points denominator
+    uint32 internal constant SOLVER_GAS_LIMIT = 1_000_000;
+    uint32 internal constant DAPP_GAS_LIMIT = 500_000;
     address internal constant _ETH = address(0); // address of the ETH token
 
     uint256 public govPercent;
@@ -37,17 +35,24 @@ contract BackrunDAppControl is DAppControl {
     event GovernancePayoutSplitUpdated(uint256 oldPercentage, uint256 newPercentage);
 
     // allocate value hook events
-    event UserPayout(address indexed user, uint256 amount);
+    event UserPayout(address indexed user, uint256 amount, address bidToken);
     event GovernancePayout(address indexed govPayoutAddr, uint256 amount);
+
+    // router events
+    event RouterAdded(address indexed router);
+    event RouterRemoved(address indexed router);
 
     error InsufficientOutputBalance();
     error InsufficientUserOpValue();
     error InvalidRewardAddress();
     error InvalidUserOpData();
     error OnlyGovernance();
+    error OnlyControl();
     error UserOpDappNotSwapRouter();
     error SwapFailed();
     error WrongBidToken();
+    error GovPercentExceedsScale();
+    error GovPayoutAddrZero();
 
     /**
      * @notice Constructor for UniswapV2DAppControl
@@ -73,7 +78,7 @@ contract BackrunDAppControl is DAppControl {
                 requirePreSolver: false,
                 requirePostSolver: false,
                 zeroSolvers: true,
-                reuseUserOp: true,
+                reuseUserOp: false,
                 userAuctioneer: false,
                 solverAuctioneer: false,
                 unknownAuctioneer: false,
@@ -89,10 +94,12 @@ contract BackrunDAppControl is DAppControl {
     {
         // Set bidToken to constant ETH if zero address
         govPayoutAddr = _govPayoutAddr;
+        emit GovernancePayoutAddressUpdated(address(0), _govPayoutAddr);
 
         // Initialize governance percentage
-        require(_govPercent <= PERCENTAGE_DENOMINATOR, "Governance percentage cannot exceed 100%");
+        require(_govPercent <= BPS_SCALE, GovPercentExceedsScale());
         govPercent = _govPercent;
+        emit GovernancePayoutSplitUpdated(0, _govPercent);
     }
 
     // ---------------------------------------------------- //
@@ -106,10 +113,10 @@ contract BackrunDAppControl is DAppControl {
      * @dev The zero address (address(0)) is not allowed as a reward address
      */
     function setGovPayoutAddr(address _govPayoutAddr) external onlyGovernance {
-        require(_govPayoutAddr != govPayoutAddr, "Governance payout address is already set");
-        require(_govPayoutAddr != address(0), "Governance address cannot be zero");
-        emit GovernancePayoutAddressUpdated(govPayoutAddr, _govPayoutAddr);
+        require(_govPayoutAddr != address(0), GovPayoutAddrZero());
+        
         govPayoutAddr = _govPayoutAddr;
+        emit GovernancePayoutAddressUpdated(govPayoutAddr, _govPayoutAddr);
     }
 
     /**
@@ -119,11 +126,10 @@ contract BackrunDAppControl is DAppControl {
      * @dev The governance percentage cannot exceed 100% (10000 basis points)
      */
     function setGovPercent(uint256 _govPercent) external onlyGovernance {
-        require(_govPercent <= PERCENTAGE_DENOMINATOR, "Governance percentage cannot exceed 100%");
-        require(_govPercent != govPercent, "New percentage must be different");
-
-        emit GovernancePayoutSplitUpdated(govPercent, _govPercent);
+        require(_govPercent <= BPS_SCALE, GovPercentExceedsScale());
+        
         govPercent = _govPercent;
+        emit GovernancePayoutSplitUpdated(govPercent, _govPercent);
     }
 
     /**
@@ -133,6 +139,7 @@ contract BackrunDAppControl is DAppControl {
      */
     function addRouter(address _router) external onlyGovernance {
         routerWhitelist[_router] = true;
+        emit RouterAdded(_router);
     }
 
     /**
@@ -142,6 +149,7 @@ contract BackrunDAppControl is DAppControl {
      */
     function removeRouter(address _router) external onlyGovernance {
         routerWhitelist[_router] = false;
+        emit RouterRemoved(_router);
     }
 
     // ---------------------------------------------------- //
@@ -151,14 +159,9 @@ contract BackrunDAppControl is DAppControl {
     /**
      * @notice Swaps tokens using the provided swap info
      * @param _swapInfo The swap info containing the input token, input amount, output token, output min, and target
-     * @dev This function is only callable by the DAppControl
+     * @dev Entry point function doesn't do anything, call is made in preOpsCall
      */
-    function swap(SwapTokenInfo memory _swapInfo) external payable {
-        SafeTransferLib.safeTransferFrom(_swapInfo.inputToken, msg.sender, address(this), _swapInfo.inputAmount);
-        SafeTransferLib.safeApprove(_swapInfo.inputToken, _swapInfo.target, _swapInfo.inputAmount);
-        (bool success, bytes memory _returnData) = _swapInfo.target.call{value: msg.value}(_swapInfo.swapData);
-        if (!success) revert SwapFailed();
-    }
+    function swap(SwapTokenInfo memory _swapInfo) external payable {}
 
     
     // ---------------------------------------------------- //
@@ -168,22 +171,24 @@ contract BackrunDAppControl is DAppControl {
     function _preOpsCall(UserOperation calldata userOp) internal virtual override returns (bytes memory) {
         SwapTokenInfo memory _swapInfo = abi.decode(userOp.data[4:], (SwapTokenInfo));
 
-        // Transfer bid token to governance payout address
-        (bool success, bytes memory data) =
-            CONTROL.staticcall(abi.encodeWithSelector(this.isRouterWhitelisted.selector, _swapInfo.target));
-        bool _routerWhitelist = abi.decode(data, (bool));
-        if (!_routerWhitelist) revert UserOpDappNotSwapRouter();
+        bool _routerWhitelist = BackrunDAppControl(CONTROL).isRouterWhitelisted(_swapInfo.target); 
+        require(_routerWhitelist, UserOpDappNotSwapRouter());
 
         // If inputToken is ERC20, transfer tokens from user to EE, and approve router for swap
         if (userOp.value < _swapInfo.inputAmount) {
             if (_swapInfo.inputToken != _ETH) {
                 _transferUserERC20(_swapInfo.inputToken, address(this), _swapInfo.inputAmount);
-                SafeTransferLib.safeApprove(_swapInfo.inputToken, CONTROL, _swapInfo.inputAmount);
-                
+                SafeTransferLib.safeApprove(_swapInfo.inputToken, _swapInfo.target, _swapInfo.inputAmount);
             } else {
                 revert InsufficientUserOpValue();
-            }
+            }    
         }
+
+        (bool success, ) = _swapInfo.target.call{value: msg.value}(_swapInfo.swapData);
+        require(success, SwapFailed());
+
+        uint256 _outputTokenBalance = _balanceOf(_swapInfo.outputToken);
+        require(_outputTokenBalance >= _swapInfo.outputMin, InsufficientOutputBalance());
 
         return userOp.data[4:]; // return SwapTokenInfo in bytes format, to be used in allocateValue.
     }
@@ -197,21 +202,15 @@ contract BackrunDAppControl is DAppControl {
         // Decode the swap info from the data
         SwapTokenInfo memory _swapInfo = abi.decode(data, (SwapTokenInfo));
 
+        (address _govPayoutAddr, uint256 _govPercent) = BackrunDAppControl(CONTROL).getPayoutData();
+
         uint256 _outputTokenBalance = _balanceOf(_swapInfo.outputToken);
-        if (_outputTokenBalance < _swapInfo.outputMin) revert InsufficientOutputBalance();
-
-        // Transfer bid token to governance payout address
-        (bool success, bytes memory _payoutData) =
-            CONTROL.staticcall(abi.encodeWithSelector(this.getPayoutData.selector));
-
-        if (!success || data.length == 0) revert InvalidRewardAddress();
-        (address _govPayoutAddr, uint256 _govPercent) = abi.decode(_payoutData, (address, uint256));
+        require(_outputTokenBalance >= _swapInfo.outputMin, InsufficientOutputBalance());
 
         // Calculate governance and user amounts and split the bidAmount
-        uint256 govPayoutAmount = (bidAmount * _govPercent) / PERCENTAGE_DENOMINATOR;
-        console.log("govPayoutAmount", govPayoutAmount);
+        uint256 govPayoutAmount = (bidAmount * _govPercent) / BPS_SCALE;
         uint256 userAmount = _outputTokenBalance - govPayoutAmount;
-        console.log("userAmount", userAmount);
+        
         // Transfer governance amount to payout address if not zero
         if (govPayoutAmount > 0) {
             if (_bidToken == _ETH) {
@@ -228,7 +227,7 @@ contract BackrunDAppControl is DAppControl {
         } else {
             SafeTransferLib.safeTransfer(_bidToken, _user(), userAmount);
         }
-        emit UserPayout(_user(), userAmount);
+        emit UserPayout(_user(), bidAmount, _bidToken);
     }
 
     // ---------------------------------------------------- //
@@ -273,8 +272,8 @@ contract BackrunDAppControl is DAppControl {
     // ---------------------------------------------------- //
 
     modifier onlyGovernance() {
-        address _dAppGov = BackrunDAppControl(this).getDAppSignatory();
-        if (msg.sender != _dAppGov) revert OnlyGovernance();
+        require(msg.sender == governance, OnlyGovernance());
+        require(address(this) == CONTROL, OnlyControl());
         _;
     }
 }

@@ -133,7 +133,6 @@ contract BackrunDAppControlTest is Test {
         uint256 userTokenBalanceBefore = _balanceOf(_path1[1], userEOA);
         
         uint256 gasLimit = calculateGasLimit(control, solverOps.length, userOp.gas);
-        console.log("gasLimit", gasLimit);
 
         vm.startPrank(userEOA);
         IERC20(_path1[0]).approve(address(ATLAS), amountIn);
@@ -278,38 +277,4 @@ contract BackrunDAppControlTest is Test {
                LOWER_BASE_EXEC_GAS_TOLERANCE + 
                TOLERANCE_PER_SOLVER * solverOpsLength;
     }
-}
-
-// Just bids `bidAmount` in ETH token - doesn't do anything else
-contract MockETHSolver is SolverBase {
-    bool internal s_shouldSucceed;
-
-    constructor(address weth, address atlas) SolverBase(weth, atlas, msg.sender) {
-        s_shouldSucceed = true; // should succeed by default, can be set to false
-    }
-
-    function shouldSucceed() public view returns (bool) {
-        return s_shouldSucceed;
-    }
-
-    function setShouldSucceed(bool succeed) public {
-        s_shouldSucceed = succeed;
-    }
-
-    function solve() public view onlySelf {
-        require(s_shouldSucceed, "Solver failed intentionally");
-
-        // The solver bid representing user's minAmountUserBuys of tokenUserBuys is sent to the
-        // Execution Environment in the payBids modifier logic which runs after this function ends.
-    }
-
-    // This ensures a function can only be called through atlasSolverCall
-    // which includes security checks to work safely with Atlas
-    modifier onlySelf() {
-        require(msg.sender == address(this), "Not called via atlasSolverCall");
-        _;
-    }
-
-    fallback() external payable { }
-    receive() external payable { }
 }
