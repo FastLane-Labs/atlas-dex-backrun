@@ -16,6 +16,7 @@ struct SwapTokenInfo {
     uint256 inputAmount;
     address outputToken;
     uint256 outputMin;
+    bool bidTokenIsOutputToken;
     address target;
     bytes swapData;
 }
@@ -29,6 +30,10 @@ contract BackrunDAppControl is DAppControl {
     uint256 public govPercent;
     address public govPayoutAddr;
     mapping(address => bool) public routerWhitelist;
+
+    // Transient storage variables for refund handling
+    address transient internal t_refundRecipient;
+    uint256 transient internal t_refundPercent;
 
     // Add a new event to log bid token changes
     event GovernancePayoutAddressUpdated(address indexed oldGovPayoutAddr, address indexed newGovPayoutAddr);
@@ -87,8 +92,7 @@ contract BackrunDAppControl is DAppControl {
                 requireFulfillment: false,
                 trustedOpHash: false,
                 invertBidValue: false,
-                exPostBids: false // NOTE: allow solver to set bidAmount after onchain bid-finding
-                // allowAllocateValueFailure: false
+                exPostBids: false
             })
         )
     {
@@ -159,9 +163,15 @@ contract BackrunDAppControl is DAppControl {
     /**
      * @notice Swaps tokens using the provided swap info
      * @param _swapInfo The swap info containing the input token, input amount, output token, output min, and target
+     * @param _refundRecipient The address that will receive the refund
+     * @param _refundPercent The percentage of the bid amount that goes to the refund recipient
      * @dev Entry point function doesn't do anything, call is made in preOpsCall
      */
-    function swap(SwapTokenInfo memory _swapInfo) external payable {}
+    function swap(
+        SwapTokenInfo calldata _swapInfo,
+        address _refundRecipient,
+        uint256 _refundPercent
+    ) external payable {}
 
     
     // ---------------------------------------------------- //
@@ -169,7 +179,11 @@ contract BackrunDAppControl is DAppControl {
     // ---------------------------------------------------- //
 
     function _preOpsCall(UserOperation calldata userOp) internal virtual override returns (bytes memory) {
-        SwapTokenInfo memory _swapInfo = abi.decode(userOp.data[4:], (SwapTokenInfo));
+        (SwapTokenInfo memory _swapInfo, address _refundRecipient, uint256 _refundPercent) 
+            = abi.decode(userOp.data[4:], (SwapTokenInfo, address, uint256));
+        require(_refundPercent <= BPS_SCALE - 1000, GovPercentExceedsScale());
+
+        setRefundParams(_refundRecipient, _refundPercent);
 
         bool _routerWhitelist = BackrunDAppControl(CONTROL).isRouterWhitelisted(_swapInfo.target); 
         require(_routerWhitelist, UserOpDappNotSwapRouter());
@@ -184,50 +198,54 @@ contract BackrunDAppControl is DAppControl {
             }    
         }
 
+        uint256 _outputTokenBalanceBefore = _balanceOf(userOp.from, _swapInfo.outputToken);
+
         (bool success, ) = _swapInfo.target.call{value: msg.value}(_swapInfo.swapData);
         require(success, SwapFailed());
 
-        uint256 _outputTokenBalance = _balanceOf(_swapInfo.outputToken);
-        require(_outputTokenBalance >= _swapInfo.outputMin, InsufficientOutputBalance());
+        uint256 _outputTokenBalanceAfter = _balanceOf(userOp.from, _swapInfo.outputToken);
+        require(_outputTokenBalanceAfter - _outputTokenBalanceBefore >= _swapInfo.outputMin, InsufficientOutputBalance());
 
-        return userOp.data[4:]; // return SwapTokenInfo in bytes format, to be used in allocateValue.
+        return userOp.data[4:]; 
     }
 
     function _preSolverCall(SolverOperation calldata solverOp, bytes calldata data) internal virtual override {
-        SwapTokenInfo memory _swapInfo = abi.decode(data, (SwapTokenInfo));
+        (SwapTokenInfo memory _swapInfo, , ) = abi.decode(data, (SwapTokenInfo, address, uint256));
         if (solverOp.bidToken != _swapInfo.outputToken) revert WrongBidToken();
     }
 
     function _allocateValueCall(bool, address _bidToken, uint256 bidAmount, bytes calldata data) internal virtual override {
         // Decode the swap info from the data
-        SwapTokenInfo memory _swapInfo = abi.decode(data, (SwapTokenInfo));
-
+        (SwapTokenInfo memory _swapInfo, , ) = abi.decode(data, (SwapTokenInfo, address, uint256));
+        (address _refundRecipient, uint256 _refundPercent) = getRefundParams();
         (address _govPayoutAddr, uint256 _govPercent) = BackrunDAppControl(CONTROL).getPayoutData();
+        require(_govPercent + _refundPercent <= BPS_SCALE, GovPercentExceedsScale());
 
-        uint256 _outputTokenBalance = _balanceOf(_swapInfo.outputToken);
-        require(_outputTokenBalance >= _swapInfo.outputMin, InsufficientOutputBalance());
+        uint256 _outputTokenBalance = _balanceOf(address(this), _bidToken);
+        require(_outputTokenBalance >= bidAmount, InsufficientOutputBalance());
 
-        // Calculate governance and user amounts and split the bidAmount
-        uint256 govPayoutAmount = (bidAmount * _govPercent) / BPS_SCALE;
-        uint256 userAmount = _outputTokenBalance - govPayoutAmount;
+        // Calculate governance, refund, and user amounts
+        uint256 govPayoutAmount = (_outputTokenBalance * _govPercent) / BPS_SCALE;
+        uint256 refundAmount = (_outputTokenBalance * _refundPercent) / BPS_SCALE;
+        uint256 userAmount = _outputTokenBalance - govPayoutAmount - refundAmount;
         
         // Transfer governance amount to payout address if not zero
         if (govPayoutAmount > 0) {
-            if (_bidToken == _ETH) {
-                SafeTransferLib.safeTransferETH(_govPayoutAddr, govPayoutAmount);
-            } else {
-                SafeTransferLib.safeTransfer(_bidToken, _govPayoutAddr, govPayoutAmount);
-            }
+            _transferToken(_bidToken, _govPayoutAddr, govPayoutAmount);
             emit GovernancePayout(_govPayoutAddr, govPayoutAmount);
         }
 
-        //Transfer user tokens to user 
-        if (_bidToken == _ETH) {
-            SafeTransferLib.safeTransferETH(_user(), userAmount);
-        } else {
-            SafeTransferLib.safeTransfer(_bidToken, _user(), userAmount);
+        // Transfer refund amount if not zero
+        if (refundAmount > 0 && _refundRecipient != address(0)) {
+            _transferToken(_bidToken, _refundRecipient, refundAmount);
+            emit UserPayout(_refundRecipient, refundAmount, _bidToken);
         }
-        emit UserPayout(_user(), bidAmount, _bidToken);
+
+        //Transfer user tokens to user 
+        if (userAmount > 0) {
+            _transferToken(_bidToken, _user(), userAmount);
+            emit UserPayout(_user(), userAmount, _bidToken);
+        }   
     }
 
     // ---------------------------------------------------- //
@@ -235,8 +253,8 @@ contract BackrunDAppControl is DAppControl {
     // ---------------------------------------------------- //
 
     function getBidFormat(UserOperation calldata userOp) public view virtual override returns (address) {
-        SwapTokenInfo memory _swapInfo = abi.decode(userOp.data[4:], (SwapTokenInfo));
-        return _swapInfo.outputToken;
+        (SwapTokenInfo memory _swapInfo, , ) = abi.decode(userOp.data[4:], (SwapTokenInfo, address, uint256));
+        return _swapInfo.bidTokenIsOutputToken ? _swapInfo.outputToken : _ETH;
     }
 
     function getBidValue(SolverOperation calldata solverOp) public view virtual override returns (uint256) {
@@ -259,12 +277,33 @@ contract BackrunDAppControl is DAppControl {
         return routerWhitelist[_router];
     }
 
-    function _balanceOf(address token) internal view returns (uint256) {
+    function _balanceOf(address _user, address token) internal view returns (uint256) {
         if (token == _ETH) {
-            return address(this).balance;
+            return _user.balance;
         } else {
-            return SafeTransferLib.balanceOf(token, address(this));
+            return SafeTransferLib.balanceOf(token, _user);
         }
+    }
+
+    function _transferToken(address _token, address _to, uint256 _amount) internal {
+        if (_token == _ETH) {
+            SafeTransferLib.safeTransferETH(_to, _amount);
+        } else {
+            SafeTransferLib.safeTransfer(_token, _to, _amount);
+        }
+    }
+
+    // ---------------------------------------------------- //
+    //                    INTERNAL FUNCTIONS                //
+    // ---------------------------------------------------- //
+
+    function setRefundParams(address _refundRecipient, uint256 _refundPercent) internal {
+        t_refundRecipient = _refundRecipient;
+        t_refundPercent = _refundPercent;
+    }
+
+    function getRefundParams() internal view returns (address, uint256) {
+        return (t_refundRecipient, t_refundPercent);
     }
 
     // ---------------------------------------------------- //

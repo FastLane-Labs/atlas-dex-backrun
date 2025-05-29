@@ -103,7 +103,7 @@ contract BackrunDAppControlTest is Test {
             amountIn,         // amountIn
             1,                // amountOutMin (low for testing)
             _path1,           // path
-            executionEnvironment, // to
+            userEOA, // to
             block.timestamp * 2 // deadline
         );
 
@@ -112,13 +112,18 @@ contract BackrunDAppControlTest is Test {
             inputAmount: amountIn,
             outputToken: rare,
             outputMin: 1,
+            bidTokenIsOutputToken: true,
             target: address(ROUTER),
             swapData: swapData
         });
 
+        address refundRecipient = makeAddr("REFUND_RECIPIENT");
+
         bytes memory userOpData = abi.encodeWithSelector(
             BackrunDAppControl.swap.selector,
-            swapInfo
+            swapInfo,
+            refundRecipient,
+            1000
         );
 
         uint256 msgValue = bundlerGasEth;

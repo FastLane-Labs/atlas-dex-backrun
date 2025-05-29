@@ -24,8 +24,8 @@ contract DepositAndBondScript is Script {
         // Get shMonad interface
         IShMonad shMonad = IShMonad(shmonadAddress);
 
-        // Deposit and bond 5 ETH worth of MON
-        uint256 amountToDeposit = 9e18; // 1 ETH
+        // Deposit and bond 100 ETH worth of MON
+        uint256 amountToDeposit = 100e18; // 100 ETH
         console.log("Depositing and bonding", amountToDeposit, "wei of MON");
 
         // Call depositAndBond with the policy ID and amount
