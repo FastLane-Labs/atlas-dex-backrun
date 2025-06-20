@@ -51,13 +51,20 @@ contract DeployBackrunDAppControlScript is Test {
 
         address SWAP_ROUTER1 = 0x88B96aF200c8a9c35442C8AC6cd3D22695AaE4F0; // Uniswap V2 Router
         address SWAP_ROUTER2 = 0xCa810D095e90Daae6e867c19DF6D9A8C56db2c89; // Uniswap V2 Router
+        address SWAP_ROUTER3 = 0x0000000000001fF3684f28c67538d4D072C22734;
+        address SWAP_ROUTER4 = 0x0f2D067f8438869da670eFc855eACAC71616ca31; 
         backrunDAppControl.addRouter(SWAP_ROUTER1);
         backrunDAppControl.addRouter(SWAP_ROUTER2);
+        backrunDAppControl.addRouter(SWAP_ROUTER3);
+        backrunDAppControl.addRouter(SWAP_ROUTER4);
         bool isRouterWhitelisted = backrunDAppControl.isRouterWhitelisted(SWAP_ROUTER1);
         console.log("isRouterWhitelisted", isRouterWhitelisted);
         isRouterWhitelisted = backrunDAppControl.isRouterWhitelisted(SWAP_ROUTER2);
         console.log("isRouterWhitelisted", isRouterWhitelisted);
-
+        isRouterWhitelisted = backrunDAppControl.isRouterWhitelisted(SWAP_ROUTER3);
+        console.log("isRouterWhitelisted", isRouterWhitelisted);
+        isRouterWhitelisted = backrunDAppControl.isRouterWhitelisted(SWAP_ROUTER4);
+        console.log("isRouterWhitelisted", isRouterWhitelisted);
         // shMonad.transferOwnership(payable(address(backrunDAppControl)));
 
         vm.stopBroadcast();

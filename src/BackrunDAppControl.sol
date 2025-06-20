@@ -196,8 +196,8 @@ contract BackrunDAppControl is DAppControl {
     function swap(
         SwapTokenInfo calldata _swapInfo,
         address _refundRecipient,
-        uint256 _refundPercent,
-        uint256 _gasLimit
+        uint256 _refundPercent
+        // uint256 _gasLimit
     ) external payable {
         IAtlas atlas = IAtlas(ATLAS);
         (address executionEnvironment, , bool exists) = atlas.getExecutionEnvironment(_user(), CONTROL);
@@ -207,10 +207,10 @@ contract BackrunDAppControl is DAppControl {
             (address _govPayoutAddr, ) = BackrunDAppControl(payable(CONTROL)).getPayoutData();
             
             // If the gov payout addr has bonded shares and there are no solverOps, sponsor user gas
-            if (shMonad.balanceOfBonded(_policyId, _govPayoutAddr) > 0 && _solverCount() == 0) {
-                uint256 _gasAmount = _gasLimit * tx.gasprice;
-                shMonad.agentWithdrawFromBonded(_policyId, _govPayoutAddr, _user(), _gasAmount, 0, true);
-            }
+            // if (shMonad.balanceOfBonded(_policyId, _govPayoutAddr) > 0 && _solverCount() == 0) {
+            //     uint256 _gasAmount = _gasLimit * tx.gasprice;
+            //     shMonad.agentWithdrawFromBonded(_policyId, _govPayoutAddr, _user(), _gasAmount, 0, true);
+            // }
 
             // If the input token is ETH, call the swap function with msg.value
             if (_swapInfo.inputToken == _ETH) {
