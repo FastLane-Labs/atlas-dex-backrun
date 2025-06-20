@@ -15,6 +15,13 @@ import { IERC20Full } from "./IERC20Full.sol";
  */
 interface IShMonad is IERC4626Custom, IERC20Full {
     // --------------------------------------------- //
+    //                 Ownable Functions             //
+    // --------------------------------------------- //
+    function transferOwnership(address newOwner) external;
+
+    function owner() external view returns (address);
+
+    // --------------------------------------------- //
     //             Extra ERC4626 Functions           //
     // --------------------------------------------- //
 

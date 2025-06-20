@@ -3,37 +3,33 @@ pragma solidity ^0.8.22;
 
 import "forge-std/Script.sol";
 import "../src/interfaces/IShMonad.sol";
+import { BackrunDAppControl } from "src/BackrunDAppControl.sol";
 
 contract DepositAndBondScript is Script {
     function run() external {
         console.log("\n=== DEPOSITING AND BONDING TO SHMONAD ===\n");
 
-        uint256 deployerPrivateKey = vm.envUint("SOLVER1_PRIVATE_KEY");
+        uint256 deployerPrivateKey = vm.envUint("GOV_PRIVATE_KEY");
         address shmonadAddress = vm.envAddress("SHMONAD_ADDRESS");
-        uint64 policyId = uint64(vm.envUint("POLICY_ID"));
+        address auctioneer = vm.envAddress("AUCTIONEER_ADDRESS");
+        uint256 userPrivateKey = vm.envUint("USER_PRIVATE_KEY");
+        uint64 policyId = uint64(14);
         address deployer = vm.addr(deployerPrivateKey);
-
+        address user = vm.addr(userPrivateKey);
         console.log("===============================");
         console.log("Deployer address:", deployer);
         console.log("shMonad address:", shmonadAddress);
         console.log("Policy ID:", policyId);
         console.log("===============================");
 
-        vm.startBroadcast(deployerPrivateKey);
-
-        // Get shMonad interface
+        vm.startBroadcast(userPrivateKey);
         IShMonad shMonad = IShMonad(shmonadAddress);
-
-        // Deposit and bond 100 ETH worth of MON
-        uint256 amountToDeposit = 100e18; // 100 ETH
-        console.log("Depositing and bonding", amountToDeposit, "wei of MON");
-
-        // Call depositAndBond with the policy ID and amount
-        shMonad.depositAndBond{value: amountToDeposit}(policyId, deployer, type(uint256).max);
-
-        // Get the bonded balance
-        uint256 bonded = shMonad.balanceOfBonded(policyId, deployer);
+        // shMonad.depositAndBond{value: 10 ether}(policyId, user, type(uint256).max);
+        
+        uint256 bonded = shMonad.balanceOfBonded(policyId, user);
         console.log("Bonded balance:", bonded);
+
+        
 
         vm.stopBroadcast();
     }

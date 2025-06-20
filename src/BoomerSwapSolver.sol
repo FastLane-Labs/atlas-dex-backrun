@@ -77,9 +77,9 @@ contract BoomerSwapSolver is SolverBase, ReentrancyGuard {
         uint256 amountIn,
         uint256 bidAmount,
         uint256 boostYieldPct
-
     ) external payable nonReentrant returns (uint256) {
         uint256 amount = amountIn;
+        uint256 wethProfit = 0;
         
         for (uint256 i = 0; i < swapPath.length; i++) {                        
             Swap memory swapWithId = swapPath[i];
@@ -91,16 +91,23 @@ contract BoomerSwapSolver is SolverBase, ReentrancyGuard {
             } else {
                 amount = executeV2Swap(swapWithId, amount);
             }
+            if (swapWithId.tokenOut != WETH_ADDRESS) {
+                amount = balanceOf(swapWithId.tokenOut);
+            } else {
+                require(amount >= (amountIn + bidAmount), "amountOut < amountIn");
+                wethProfit = amount - (amountIn + bidAmount);
+                amount = bidAmount; 
+            }
         }
 
-        require(amount >= (amountIn + bidAmount), "amountOut < amountIn");
-
-        uint256 profit = amount - amountIn - bidAmount;
+        if (wethProfit > 0 && boostYieldPct > 0) {
+            uint256 boostYield = wethProfit * boostYieldPct / 10000;
+            IWETH9(WETH_ADDRESS).withdraw(boostYield);
+            shmonad.boostYield{value: boostYield}();
+            wethProfit = wethProfit - boostYield;
+        }
         
-        uint256 boostYield = profit * boostYieldPct / 10000;
-        IWETH9(WETH_ADDRESS).withdraw(boostYield);
-        shmonad.boostYield{value: boostYield}();
-        return amount;
+        return wethProfit;
     }
 
     function executeV2Swap(Swap memory swap, uint256 amountIn) internal returns (uint256) {
@@ -320,6 +327,14 @@ contract BoomerSwapSolver is SolverBase, ReentrancyGuard {
         require(address(this).balance >= amount, "Insufficient ETH balance");
         (bool success, ) = _owner.call{value: amount}("");
         require(success, "ETH transfer failed");
+    }
+
+    function balanceOf(address token) internal view returns (uint256) {
+        if (token == WETH_ADDRESS) {
+            return address(this).balance;
+        } else {
+            return ERC20(token).balanceOf(address(this));
+        }
     }
     
     // Allow the contract to receive ETH

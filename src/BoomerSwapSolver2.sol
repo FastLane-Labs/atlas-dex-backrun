@@ -11,7 +11,7 @@ interface IWETH9 {
 }
 import { SolverBase } from "@atlas/solver/SolverBase.sol";
 import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import "forge-std/console.sol";
+
 // Monadex V1 related structs
 struct BubbleV1TypesFraction {
     uint256 numerator;
@@ -78,7 +78,7 @@ contract BoomerSwapSolver2 is SolverBase, ReentrancyGuard {
         for (uint256 i = 0; i < swapPath.length; i++) {                        
             Swap memory swap = swapPath[i];
 
-            if (swap.tokenIn == bidToken) {
+            if (swap.tokenIn == bidToken && bidToken != WETH_ADDRESS) {
                 amountOut -= bidAmount;
             }
             
@@ -89,6 +89,8 @@ contract BoomerSwapSolver2 is SolverBase, ReentrancyGuard {
             } else {
                 amountOut = executeV2Swap(swap, amountOut);
             }
+
+            amountOut = balanceOf(swap.tokenOut);
         }
 
         require(amountOut >= amountIn, "amountOut < amountIn");
@@ -312,6 +314,14 @@ contract BoomerSwapSolver2 is SolverBase, ReentrancyGuard {
         require(address(this).balance >= amount, "Insufficient ETH balance");
         (bool success, ) = _owner.call{value: amount}("");
         require(success, "ETH transfer failed");
+    }
+
+    function balanceOf(address token) internal view returns (uint256) {
+        if (token == WETH_ADDRESS) {
+            return address(this).balance;
+        } else {
+            return ERC20(token).balanceOf(address(this));
+        }
     }
     
     // Allow the contract to receive ETH
