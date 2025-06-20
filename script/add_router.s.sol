@@ -33,11 +33,15 @@ contract DeployBackrunDAppControlScript is Test {
 
         vm.startBroadcast(deployerPrivateKey);
 
-        BackrunDAppControl backrunDAppControl =  BackrunDAppControl(payable(0x30A35749C7516402edbb31af33E9d2Fe77bF85d6));
+        BackrunDAppControl backrunDAppControl =  BackrunDAppControl(payable(0x2feDd5EcAE39f6cB0bf9ad14043652778924a7cd));
 
-        address SWAP_ROUTER = 0x0f2D067f8438869da670eFc855eACAC71616ca31; // Uniswap V2 Router
+        address SWAP_ROUTER = 0x0000000000001fF3684f28c67538d4D072C22734;
+        address SWAP_ROUTER2 = 0x0f2D067f8438869da670eFc855eACAC71616ca31; 
         backrunDAppControl.addRouter(SWAP_ROUTER);
+        backrunDAppControl.addRouter(SWAP_ROUTER2);
         bool isRouterWhitelisted = backrunDAppControl.isRouterWhitelisted(SWAP_ROUTER);
+        console.log("isRouterWhitelisted", isRouterWhitelisted);
+        isRouterWhitelisted = backrunDAppControl.isRouterWhitelisted(SWAP_ROUTER2);
         console.log("isRouterWhitelisted", isRouterWhitelisted);
 
         vm.stopBroadcast();

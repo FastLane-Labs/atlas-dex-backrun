@@ -21,8 +21,8 @@ import { IShMonad } from "../src/interfaces/IShMonad.sol";
 
 // Uniswap V2 mainnet addresses
 address constant SWAP_ROUTER = 0xCa810D095e90Daae6e867c19DF6D9A8C56db2c89; // Uniswap V2 Router
-address payable constant ATLAS_ADDRESS = payable(0x9958Ab9f64EF51194C5378a336D2A0b0A620D31c);
-address constant ATLAS_VERIFICATION_ADDRESS = 0x318b5e9806389728b881aea090b7d2330cD7aAd2;
+address payable constant ATLAS_ADDRESS = payable(0x4a730A56344873FB28f7C3d65A67Fea56f5e0F46);
+address constant ATLAS_VERIFICATION_ADDRESS = 0x834B181d1F4Cd9Ec61E02D0DF0E5e4F944eFA508;
 address constant SHMONAD_ADDRESS = 0x3a98250F98Dd388C211206983453837C8365BDc1;
 
 IUniswapV2Router02 constant ROUTER = IUniswapV2Router02(SWAP_ROUTER);

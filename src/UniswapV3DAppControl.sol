@@ -89,7 +89,8 @@ contract UniswapV3DAppControl is DAppControl {
                 requireFulfillment: false,
                 trustedOpHash: true,
                 invertBidValue: false,
-                exPostBids: true // NOTE: allow solver to set bidAmount after onchain bid-finding
+                exPostBids: true,
+                multipleSuccessfulSolvers: false
             })
         )
     {

@@ -107,8 +107,8 @@ contract UniswapV2DAppControl is DAppControl {
                 requireFulfillment: false,
                 trustedOpHash: false,
                 invertBidValue: false,
-                exPostBids: false // NOTE: allow solver to set bidAmount after onchain bid-finding
-                // allowAllocateValueFailure: false
+                exPostBids: false,
+                multipleSuccessfulSolvers: false
             })
         )
     {
