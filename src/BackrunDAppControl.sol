@@ -2,19 +2,11 @@
 pragma solidity 0.8.28;
 
 import { SafeTransferLib } from "solady/utils/SafeTransferLib.sol";
-import { IERC20 } from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
-
-import { IShMonad } from "./interfaces/IShMonad.sol";
-import { IAtlas } from "@atlas/interfaces/IAtlas.sol";
 
 import { DAppControl } from "@atlas/dapp/DAppControl.sol";
 import { CallConfig } from "@atlas/types/ConfigTypes.sol";
 import { UserOperation } from "@atlas/types/UserOperation.sol";
 import { SolverOperation } from "@atlas/types/SolverOperation.sol";
-
-import { SwapMath } from "./SwapMath.sol";
-
-import "forge-std/console.sol";
 
 struct SwapTokenInfo {
     address inputToken;
@@ -35,15 +27,11 @@ contract BackrunDAppControl is DAppControl {
 
     uint256 public govPercent;
     address public govPayoutAddr;
-    uint64 public policyId;
     mapping(address => bool) public routerWhitelist;
-
-    IShMonad public immutable shMonad;
 
     // Transient storage variables for refund handling
     address transient internal t_refundRecipient;
     uint256 transient internal t_refundPercent;
-    uint256 transient internal t_gasLimit;
     // Add a new event to log bid token changes
     event GovernancePayoutAddressUpdated(address indexed oldGovPayoutAddr, address indexed newGovPayoutAddr);
     event GovernancePayoutSplitUpdated(uint256 oldPercentage, uint256 newPercentage);
@@ -70,18 +58,14 @@ contract BackrunDAppControl is DAppControl {
 
     /**
      * @notice Constructor for UniswapV2DAppControl
-     *     @param _shMonad The address of the shMonad contract
      *     @param _atlas The address of the Atlas contract
      *     @param _govPayoutAddr The address of the governance payout address
      *     @param _govPercent The percentage of the bid amount that goes to the governance payout address
-     *     @param _policyId The policy id of the shMonad contract
      */
     constructor(
-        address _shMonad,
         address _atlas,
         address _govPayoutAddr,
-        uint256 _govPercent,
-        uint64 _policyId
+        uint256 _govPercent
     )
         DAppControl(
             _atlas,
@@ -96,7 +80,7 @@ contract BackrunDAppControl is DAppControl {
                 requirePreSolver: false,
                 requirePostSolver: false,
                 zeroSolvers: true,
-                reuseUserOp: false,
+                reuseUserOp: true,
                 userAuctioneer: false,
                 solverAuctioneer: false,
                 unknownAuctioneer: false,
@@ -118,9 +102,6 @@ contract BackrunDAppControl is DAppControl {
         require(_govPercent <= BPS_SCALE, GovPercentExceedsScale());
         govPercent = _govPercent;
         emit GovernancePayoutSplitUpdated(0, _govPercent);
-
-        policyId = _policyId;
-        shMonad = IShMonad(_shMonad);
     }
 
     // ---------------------------------------------------- //
@@ -173,15 +154,6 @@ contract BackrunDAppControl is DAppControl {
         emit RouterRemoved(_router);
     }
 
-    /**
-     * @notice Transfers the ownership of the agent to a new address
-     * @param _newOwner The address to transfer the ownership to
-     * @dev This function can only be called by the governance
-     */
-    function transferAgentOwnership(address _newOwner) external onlyGovernance {
-        shMonad.transferOwnership(_newOwner);
-    }
-
     // ---------------------------------------------------- //
     //                  ENTRYPOINT FUNCTION                 //
     // ---------------------------------------------------- //
@@ -191,48 +163,31 @@ contract BackrunDAppControl is DAppControl {
      * @param _swapInfo The swap info containing the input token, input amount, output token, output min, and target
      * @param _refundRecipient The address that will receive the refund
      * @param _refundPercent The percentage of the bid amount that goes to the refund recipient
-     * @dev Entry point function doesn't do anything, call is made in preOpsCall
+     * @dev Entry point function handles ETH swaps and preOps call handles erc20 swaps
      */
     function swap(
         SwapTokenInfo calldata _swapInfo,
         address _refundRecipient,
         uint256 _refundPercent
-        // uint256 _gasLimit
     ) external payable {
-        IAtlas atlas = IAtlas(ATLAS);
-        (address executionEnvironment, , bool exists) = atlas.getExecutionEnvironment(_user(), CONTROL);
+        // If the input token is ETH, call the swap function with msg.value
+        if (_swapInfo.inputToken == _ETH) {
+            require(msg.value == _swapInfo.inputAmount, InsufficientUserOpValue());
 
-        if (msg.sender == executionEnvironment && exists) {
-            uint64 _policyId = BackrunDAppControl(payable(CONTROL)).getPolicyId();
-            (address _govPayoutAddr, ) = BackrunDAppControl(payable(CONTROL)).getPayoutData();
-            
-            // If the gov payout addr has bonded shares and there are no solverOps, sponsor user gas
-            // if (shMonad.balanceOfBonded(_policyId, _govPayoutAddr) > 0 && _solverCount() == 0) {
-            //     uint256 _gasAmount = _gasLimit * tx.gasprice;
-            //     shMonad.agentWithdrawFromBonded(_policyId, _govPayoutAddr, _user(), _gasAmount, 0, true);
-            // }
+            uint256 _outputTokenBalanceBefore = _balanceOf(_user(), _swapInfo.outputToken);
 
-            // If the input token is ETH, call the swap function with msg.value
-            if (_swapInfo.inputToken == _ETH) {
-                require(msg.value == _swapInfo.inputAmount, InsufficientUserOpValue());
+            (bool success, ) = _swapInfo.target.call{value: msg.value}(_swapInfo.swapData);
+            require(success, SwapFailed());
 
-                bool _routerWhitelist = BackrunDAppControl(payable(CONTROL)).isRouterWhitelisted(_swapInfo.target); 
-                require(_routerWhitelist, UserOpDappNotSwapRouter());
-
-                uint256 _outputTokenBalanceBefore = _balanceOf(_user(), _swapInfo.outputToken);
-
-                (bool success, ) = _swapInfo.target.call{value: msg.value}(_swapInfo.swapData);
-                require(success, SwapFailed());
-
-                uint256 eeBalance = _balanceOf(address(this), _swapInfo.outputToken);
-                if (eeBalance > 0) {
-                    _transferToken(_swapInfo.outputToken, _user(), eeBalance);
-                }
-
-                uint256 _outputTokenBalanceAfter = _balanceOf(_user(), _swapInfo.outputToken);
-                require(_outputTokenBalanceAfter - _outputTokenBalanceBefore >= _swapInfo.outputMin, InsufficientOutputBalance());
+            uint256 eeBalance = _balanceOf(address(this), _swapInfo.outputToken);
+            if (eeBalance > 0) {
+                _transferToken(_swapInfo.outputToken, _user(), eeBalance);
             }
+
+            uint256 _outputTokenBalanceAfter = _balanceOf(_user(), _swapInfo.outputToken);
+            require(_outputTokenBalanceAfter - _outputTokenBalanceBefore >= _swapInfo.outputMin, InsufficientOutputBalance());
         }
+        
     }
 
     
@@ -241,12 +196,11 @@ contract BackrunDAppControl is DAppControl {
     // ---------------------------------------------------- //
 
     function _preOpsCall(UserOperation calldata userOp) internal virtual override returns (bytes memory) {
-        (SwapTokenInfo memory _swapInfo, address _refundRecipient, uint256 _refundPercent, uint256 _gasLimit) 
-            = abi.decode(userOp.data[4:], (SwapTokenInfo, address, uint256, uint256));
+        (SwapTokenInfo memory _swapInfo, address _refundRecipient, uint256 _refundPercent) 
+            = abi.decode(userOp.data[4:], (SwapTokenInfo, address, uint256));
         require(_refundPercent <= BPS_SCALE - 1000, GovPercentExceedsScale());
 
         _setRefundParams(_refundRecipient, _refundPercent);
-        _setGasLimit(_gasLimit);
 
         bool _routerWhitelist = BackrunDAppControl(payable(CONTROL)).isRouterWhitelisted(_swapInfo.target); 
         require(_routerWhitelist, UserOpDappNotSwapRouter());
@@ -339,10 +293,6 @@ contract BackrunDAppControl is DAppControl {
         return (govPayoutAddr, govPercent);
     }
 
-    function getPolicyId() public view returns (uint64) {
-        return policyId;
-    }
-
     function isRouterWhitelisted(address _router) public view returns (bool) {
         return routerWhitelist[_router];
     }
@@ -373,10 +323,6 @@ contract BackrunDAppControl is DAppControl {
     function _setRefundParams(address _refundRecipient, uint256 _refundPercent) internal {
         t_refundRecipient = _refundRecipient;
         t_refundPercent = _refundPercent;
-    }
-
-    function _setGasLimit(uint256 _gasLimit) internal {
-        t_gasLimit = _gasLimit;
     }
 
     function _getRefundParams() internal view returns (address, uint256) {

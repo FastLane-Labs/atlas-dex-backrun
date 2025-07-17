@@ -13,6 +13,8 @@ interface IWETH9 {
 import { SolverBase } from "@atlas/solver/SolverBase.sol";
 import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
+import "forge-std/console.sol";
+
 // Monadex V1 related structs
 struct BubbleV1TypesFraction {
     uint256 numerator;
@@ -76,38 +78,38 @@ contract BoomerSwapSolver is SolverBase, ReentrancyGuard {
         Swap[] calldata swapPath,
         uint256 amountIn,
         uint256 bidAmount,
-        uint256 boostYieldPct
+        uint256 boostYieldAmount
     ) external payable nonReentrant returns (uint256) {
         uint256 amount = amountIn;
-        uint256 wethProfit = 0;
+        address lastToken = swapPath[swapPath.length - 1].tokenOut;
         
         for (uint256 i = 0; i < swapPath.length; i++) {                        
-            Swap memory swapWithId = swapPath[i];
+            Swap memory swap = swapPath[i];
+
+            uint256 amountBefore = balanceOf(swap.tokenOut);
             
-            if (swapWithId.dexType == DexType.UniswapV3 || swapWithId.dexType == DexType.PancakeV3) {
-                amount = executeV3Swap(swapWithId, amount);
-            } else if (swapWithId.dexType == DexType.MonadexV1) {
-                amount = executeMonadexV1Swap(swapWithId, amount);
+            if (swap.dexType == DexType.UniswapV3 || swap.dexType == DexType.PancakeV3) {
+                executeV3Swap(swap, amount);
+            } else if (swap.dexType == DexType.MonadexV1) {
+                executeMonadexV1Swap(swap, amount);
             } else {
-                amount = executeV2Swap(swapWithId, amount);
+                executeV2Swap(swap, amount);
             }
-            if (swapWithId.tokenOut != WETH_ADDRESS) {
-                amount = balanceOf(swapWithId.tokenOut);
-            } else {
-                require(amount >= (amountIn + bidAmount), "amountOut < amountIn");
-                wethProfit = amount - (amountIn + bidAmount);
-                amount = bidAmount; 
-            }
+
+            uint256 amountAfter = balanceOf(swap.tokenOut);
+            require(amountAfter > amountBefore, "swap didn't increase balance");
+            amount = amountAfter - amountBefore;
         }
 
-        if (wethProfit > 0 && boostYieldPct > 0) {
-            uint256 boostYield = wethProfit * boostYieldPct / 10000;
-            IWETH9(WETH_ADDRESS).withdraw(boostYield);
-            shmonad.boostYield{value: boostYield}();
-            wethProfit = wethProfit - boostYield;
+        if (lastToken == WETH_ADDRESS) {
+            require(amount >= (amountIn + bidAmount + boostYieldAmount), "amountOut < amountIn");
+            IWETH9(WETH_ADDRESS).withdraw(boostYieldAmount);
+            shmonad.boostYield{value: boostYieldAmount}();
+        } else {
+            require(amount >= bidAmount, "amountOut < bidAmount");
         }
         
-        return wethProfit;
+        return amount;
     }
 
     function executeV2Swap(Swap memory swap, uint256 amountIn) internal returns (uint256) {
@@ -247,18 +249,34 @@ contract BoomerSwapSolver is SolverBase, ReentrancyGuard {
       int256 amount1Delta,
       bytes calldata _data
     ) external nonReentrant {
-        // Decode the data to get the swap info and callback ID
-        (Swap memory swap) = abi.decode(_data, (Swap));
-        
-        // Validate the pool
-        require(msg.sender == swap.poolAddr, "Invalid sender");
-        IUniswapV3Pool pool = IUniswapV3Pool(swap.poolAddr);
-        require(IUniswapV3Factory(pool.factory()).getPool(swap.tokenIn, swap.tokenOut, pool.fee()) == swap.poolAddr, "Invalid pool");
-        
         // Validate the amounts
         require(amount0Delta > 0 || amount1Delta > 0, "Invalid amountDeltas");
+
+        Swap memory swap;
         
+        IUniswapV3Pool pool = IUniswapV3Pool(msg.sender);
+        address token0 = pool.token0();
+        address token1 = pool.token1();
         
+        // Determine which token we need to pay based on the deltas
+        if (amount0Delta > 0) {
+            swap = Swap({
+                dexType: DexType.UniswapV3,
+                poolAddr: msg.sender,
+                tokenIn: token0,
+                tokenOut: token1
+            });
+        } else if (amount1Delta > 0) {
+            swap = Swap({
+                dexType: DexType.UniswapV3,
+                poolAddr: msg.sender,
+                tokenIn: token1,
+                tokenOut: token0
+            });
+        } else {
+            revert("Invalid amountDeltas");
+        }
+
         // Transfer the required tokens to the pool
         if (amount0Delta > 0) {
             SafeTransferLib.safeTransfer(ERC20(swap.tokenIn), swap.poolAddr, uint256(amount0Delta));
@@ -273,27 +291,80 @@ contract BoomerSwapSolver is SolverBase, ReentrancyGuard {
       int256 amount1Delta,
       bytes calldata _data
     ) external nonReentrant {
-        // Decode the data to get the swap info and callback ID
-        (Swap memory swap) = abi.decode(_data, (Swap));
-        
-        // Validate the pool
-        require(msg.sender == swap.poolAddr, "Invalid sender");
-        
-        // For PancakeV3, we need to check the token is correct
-        IUniswapV3Pool pool = IUniswapV3Pool(swap.poolAddr);
-        require(
-            (pool.token0() == swap.tokenIn && pool.token1() == swap.tokenOut) ||
-            (pool.token1() == swap.tokenIn && pool.token0() == swap.tokenOut),
-            "Invalid tokens"
-        );
-        
         // Validate the amounts
         require(amount0Delta > 0 || amount1Delta > 0, "Invalid amountDeltas");
+
+        Swap memory swap;
         
+        IUniswapV3Pool pool = IUniswapV3Pool(msg.sender);
+        address token0 = pool.token0();
+        address token1 = pool.token1();
+        
+        // Determine which token we need to pay based on the deltas
+        if (amount0Delta > 0) {
+            swap = Swap({
+                dexType: DexType.UniswapV3,
+                poolAddr: msg.sender,
+                tokenIn: token0,
+                tokenOut: token1
+            });
+        } else if (amount1Delta > 0) {
+            swap = Swap({
+                dexType: DexType.UniswapV3,
+                poolAddr: msg.sender,
+                tokenIn: token1,
+                tokenOut: token0
+            });
+        } else {
+            revert("Invalid amountDeltas");
+        }
+
         // Transfer the required tokens to the pool
         if (amount0Delta > 0) {
             SafeTransferLib.safeTransfer(ERC20(swap.tokenIn), swap.poolAddr, uint256(amount0Delta));
+        } else {
+            SafeTransferLib.safeTransfer(ERC20(swap.tokenIn), swap.poolAddr, uint256(amount1Delta));
+        }
+    }
+
+    // PancakeV3 specific callback for safely handling PancakeV3 swaps
+    function zfV3SwapCallback(
+      int256 amount0Delta,
+      int256 amount1Delta,
+      bytes calldata _data
+    ) external nonReentrant {
+        // Validate the amounts
+        require(amount0Delta > 0 || amount1Delta > 0, "Invalid amountDeltas");
+
+        Swap memory swap;
+        
+        IUniswapV3Pool pool = IUniswapV3Pool(msg.sender);
+        address token0 = pool.token0();
+        address token1 = pool.token1();
+        
+        // Determine which token we need to pay based on the deltas
+        if (amount0Delta > 0) {
+            swap = Swap({
+                dexType: DexType.UniswapV3,
+                poolAddr: msg.sender,
+                tokenIn: token0,
+                tokenOut: token1
+            });
         } else if (amount1Delta > 0) {
+            swap = Swap({
+                dexType: DexType.UniswapV3,
+                poolAddr: msg.sender,
+                tokenIn: token1,
+                tokenOut: token0
+            });
+        } else {
+            revert("Invalid amountDeltas");
+        }
+
+        // Transfer the required tokens to the pool
+        if (amount0Delta > 0) {
+            SafeTransferLib.safeTransfer(ERC20(swap.tokenIn), swap.poolAddr, uint256(amount0Delta));
+        } else {
             SafeTransferLib.safeTransfer(ERC20(swap.tokenIn), swap.poolAddr, uint256(amount1Delta));
         }
     }
@@ -330,7 +401,7 @@ contract BoomerSwapSolver is SolverBase, ReentrancyGuard {
     }
 
     function balanceOf(address token) internal view returns (uint256) {
-        if (token == WETH_ADDRESS) {
+        if (token == address(0)) {
             return address(this).balance;
         } else {
             return ERC20(token).balanceOf(address(this));

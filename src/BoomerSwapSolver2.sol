@@ -10,7 +10,6 @@ interface IWETH9 {
     function balanceOf(address account) external view returns (uint256);
 }
 import { SolverBase } from "@atlas/solver/SolverBase.sol";
-import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 // Monadex V1 related structs
 struct BubbleV1TypesFraction {
@@ -44,7 +43,6 @@ enum DexType {
     Null,
     UniswapV2,
     UniswapV3,
-    PancakeV3,
     MonadexV1
 }
 
@@ -53,6 +51,7 @@ struct Swap {
     address poolAddr;
     address tokenIn;
     address tokenOut;
+    uint256 amountIn;
 }
 
 // ----------------------------------------------------------------------------
@@ -61,56 +60,43 @@ struct Swap {
 // WARNING: DO NOT STORE FUNDS IN THIS CONTRACT
 // ----------------------------------------------------------------------------
 
-contract BoomerSwapSolver2 is SolverBase, ReentrancyGuard {
+contract BoomerSwapSolver2 is SolverBase {
     constructor(
         address _weth,
         address _atlas
     ) SolverBase(_weth, _atlas, msg.sender) {}
 
     function execute(
-        Swap[] calldata swapPath,
-        uint256 amountIn,
-        uint256 bidAmount,
-        address bidToken
-    ) external payable nonReentrant returns (uint256) {
-        uint256 amountOut = amountIn;
+        Swap[] calldata swapPath
+    ) external payable {
         
         for (uint256 i = 0; i < swapPath.length; i++) {                        
             Swap memory swap = swapPath[i];
-
-            if (swap.tokenIn == bidToken && bidToken != WETH_ADDRESS) {
-                amountOut -= bidAmount;
-            }
             
-            if (swap.dexType == DexType.UniswapV3 || swap.dexType == DexType.PancakeV3) {
-                amountOut = executeV3Swap(swap, amountOut);
+            if (swap.dexType == DexType.UniswapV3) {
+                executeV3Swap(swap);
             } else if (swap.dexType == DexType.MonadexV1) {
-                amountOut = executeMonadexV1Swap(swap, amountOut);
+                executeMonadexV1Swap(swap);
             } else {
-                amountOut = executeV2Swap(swap, amountOut);
+                executeV2Swap(swap);
             }
-
-            amountOut = balanceOf(swap.tokenOut);
         }
-
-        require(amountOut >= amountIn, "amountOut < amountIn");
-        return amountOut;
     }
 
-    function executeV2Swap(Swap memory swap, uint256 amountIn) internal returns (uint256) {
+    function executeV2Swap(Swap memory swap) internal returns (uint256) {
         if (swap.dexType == DexType.UniswapV2) {
             IUniswapV2Pair pair = IUniswapV2Pair(swap.poolAddr);
             (uint112 reserve0, uint112 reserve1, ) = pair.getReserves();
             require(pair.token0() == swap.tokenIn || pair.token1() == swap.tokenIn, "Invalid tokenIn");
             require(pair.token0() == swap.tokenOut || pair.token1() == swap.tokenOut, "Invalid tokenOut");
 
-            SafeTransferLib.safeTransfer(ERC20(swap.tokenIn), swap.poolAddr, amountIn);
+            SafeTransferLib.safeTransfer(ERC20(swap.tokenIn), swap.poolAddr, swap.amountIn);
             if (swap.tokenIn == pair.token0()) {
-                uint amtOut = getUniswapV2AmountOut(amountIn, reserve0, reserve1);
+                uint amtOut = getUniswapV2AmountOut(swap.amountIn, reserve0, reserve1);
                 pair.swap(0, amtOut, address(this), bytes(""));
                 return uint256(amtOut);
             } else {
-                uint amtOut = getUniswapV2AmountOut(amountIn, reserve1, reserve0);
+                uint amtOut = getUniswapV2AmountOut(swap.amountIn, reserve1, reserve0);
                 pair.swap(amtOut, 0, address(this), bytes(""));
                 return uint256(amtOut);
             }
@@ -119,7 +105,7 @@ contract BoomerSwapSolver2 is SolverBase, ReentrancyGuard {
         }
     }
 
-    function executeMonadexV1Swap(Swap memory swap, uint256 amountIn) internal returns (uint256) {
+    function executeMonadexV1Swap(Swap memory swap) internal returns (uint256) {
         IMonadexV1Pair pair = IMonadexV1Pair(swap.poolAddr);
         (uint256 reserve0, uint256 reserve1) = pair.getReserves();
         require(pair.isPoolToken(swap.tokenIn), "Invalid tokenIn");
@@ -136,16 +122,16 @@ contract BoomerSwapSolver2 is SolverBase, ReentrancyGuard {
         uint256 feeFactor = feeDenominator - feeNumerator; // e.g., 997 for 0.3% fee
         
         // Transfer the input token to the pool
-        SafeTransferLib.safeTransfer(ERC20(swap.tokenIn), swap.poolAddr, amountIn);
+        SafeTransferLib.safeTransfer(ERC20(swap.tokenIn), swap.poolAddr, swap.amountIn);
         
         // Calculate expected output amount
         uint256 amountOut;
         if (isTokenAIn) {
-            amountOut = getMonadexAmountOut(amountIn, reserve0, reserve1, feeFactor, feeDenominator);
+            amountOut = getMonadexAmountOut(swap.amountIn, reserve0, reserve1, feeFactor, feeDenominator);
             // Call swap with the correct parameters for tokenA -> tokenB swap
             callMonadexSwap(pair, 0, amountOut, address(this));
         } else {
-            amountOut = getMonadexAmountOut(amountIn, reserve1, reserve0, feeFactor, feeDenominator);
+            amountOut = getMonadexAmountOut(swap.amountIn, reserve1, reserve0, feeFactor, feeDenominator);
             // Call swap with the correct parameters for tokenB -> tokenA swap
             callMonadexSwap(pair, amountOut, 0, address(this));
         }
@@ -200,18 +186,21 @@ contract BoomerSwapSolver2 is SolverBase, ReentrancyGuard {
         pair.swap(swapParams);
     }
     
-    function executeV3Swap(Swap memory swap, uint256 amountIn) internal returns (uint256) {
+    function executeV3Swap(Swap memory swap) internal returns (uint256) {
         uint160 MIN_SQRT_RATIO = 4295128739;
         uint160 MAX_SQRT_RATIO = 1461446703485210103287273052203988822378723970342;
         IUniswapV3Pool pool = IUniswapV3Pool(swap.poolAddr);
         require(pool.token0() == swap.tokenIn || pool.token1() == swap.tokenIn, "Invalid tokenIn");
         require(pool.token0() == swap.tokenOut || pool.token1() == swap.tokenOut, "Invalid tokenOut");
 
+        // Encode the swap data for the callback
+        // bytes memory swapData = abi.encode(swap);
+
         if (swap.tokenIn == pool.token0()) {
             (,int256 amountOut) = pool.swap(
                 address(this), 
                 true, 
-                int256(amountIn),
+                int256(swap.amountIn),
                 MIN_SQRT_RATIO + 1,
                 bytes("")
             );
@@ -220,7 +209,7 @@ contract BoomerSwapSolver2 is SolverBase, ReentrancyGuard {
             (int256 amountOut,) = pool.swap(
                 address(this), 
                 false, 
-                int256(amountIn), 
+                int256(swap.amountIn), 
                 MAX_SQRT_RATIO - 1,
                 bytes("")
             );
@@ -233,25 +222,38 @@ contract BoomerSwapSolver2 is SolverBase, ReentrancyGuard {
       int256 amount0Delta,
       int256 amount1Delta,
       bytes calldata _data
-    ) external nonReentrant {
-        // Decode the data to get the swap info and callback ID
-        (Swap memory swap) = abi.decode(_data, (Swap));
-        
-        // Validate the pool
-        require(msg.sender == swap.poolAddr, "Invalid sender");
-        IUniswapV3Pool pool = IUniswapV3Pool(swap.poolAddr);
-        require(IUniswapV3Factory(pool.factory()).getPool(swap.tokenIn, swap.tokenOut, pool.fee()) == swap.poolAddr, "Invalid pool");
-        
+    ) external {
         // Validate the amounts
         require(amount0Delta > 0 || amount1Delta > 0, "Invalid amountDeltas");
+
+        Swap memory swap;
         
+        IUniswapV3Pool pool = IUniswapV3Pool(msg.sender);
+        address token0 = pool.token0();
+        address token1 = pool.token1();
         
-        // Transfer the required tokens to the pool
+        // Determine which token we need to pay based on the deltas
         if (amount0Delta > 0) {
-            SafeTransferLib.safeTransfer(ERC20(swap.tokenIn), swap.poolAddr, uint256(amount0Delta));
+            swap = Swap({
+                dexType: DexType.UniswapV3,
+                poolAddr: msg.sender,
+                tokenIn: token0,
+                tokenOut: token1,
+                amountIn: uint256(amount0Delta)
+            });
+        } else if (amount1Delta > 0) {
+            swap = Swap({
+                dexType: DexType.UniswapV3,
+                poolAddr: msg.sender,
+                tokenIn: token1,
+                tokenOut: token0,
+                amountIn: uint256(amount1Delta)
+            });
         } else {
-            SafeTransferLib.safeTransfer(ERC20(swap.tokenIn), swap.poolAddr, uint256(amount1Delta));
+            revert("Invalid amountDeltas");
         }
+
+        SafeTransferLib.safeTransfer(ERC20(swap.tokenIn), swap.poolAddr, swap.amountIn);
     }
     
     // PancakeV3 specific callback for safely handling PancakeV3 swaps
@@ -259,30 +261,77 @@ contract BoomerSwapSolver2 is SolverBase, ReentrancyGuard {
       int256 amount0Delta,
       int256 amount1Delta,
       bytes calldata _data
-    ) external nonReentrant {
-        // Decode the data to get the swap info and callback ID
-        (Swap memory swap) = abi.decode(_data, (Swap));
-        
-        // Validate the pool
-        require(msg.sender == swap.poolAddr, "Invalid sender");
-        
-        // For PancakeV3, we need to check the token is correct
-        IUniswapV3Pool pool = IUniswapV3Pool(swap.poolAddr);
-        require(
-            (pool.token0() == swap.tokenIn && pool.token1() == swap.tokenOut) ||
-            (pool.token1() == swap.tokenIn && pool.token0() == swap.tokenOut),
-            "Invalid tokens"
-        );
-        
+    ) external {
         // Validate the amounts
         require(amount0Delta > 0 || amount1Delta > 0, "Invalid amountDeltas");
+
+        Swap memory swap;
         
-        // Transfer the required tokens to the pool
+        IUniswapV3Pool pool = IUniswapV3Pool(msg.sender);
+        address token0 = pool.token0();
+        address token1 = pool.token1();
+        
+        // Determine which token we need to pay based on the deltas
         if (amount0Delta > 0) {
-            SafeTransferLib.safeTransfer(ERC20(swap.tokenIn), swap.poolAddr, uint256(amount0Delta));
+            swap = Swap({
+                dexType: DexType.UniswapV3,
+                poolAddr: msg.sender,
+                tokenIn: token0,
+                tokenOut: token1,
+                amountIn: uint256(amount0Delta)
+            });
         } else if (amount1Delta > 0) {
-            SafeTransferLib.safeTransfer(ERC20(swap.tokenIn), swap.poolAddr, uint256(amount1Delta));
+            swap = Swap({
+                dexType: DexType.UniswapV3,
+                poolAddr: msg.sender,
+                tokenIn: token1,
+                tokenOut: token0,
+                amountIn: uint256(amount1Delta)
+            });
+        } else {
+            revert("Invalid amountDeltas");
         }
+
+        SafeTransferLib.safeTransfer(ERC20(swap.tokenIn), swap.poolAddr, swap.amountIn);
+    }
+
+    // PancakeV3 specific callback for safely handling PancakeV3 swaps
+    function zfV3SwapCallback(
+      int256 amount0Delta,
+      int256 amount1Delta,
+      bytes calldata _data
+    ) external {
+        // Validate the amounts
+        require(amount0Delta > 0 || amount1Delta > 0, "Invalid amountDeltas");
+
+        Swap memory swap;
+        
+        IUniswapV3Pool pool = IUniswapV3Pool(msg.sender);
+        address token0 = pool.token0();
+        address token1 = pool.token1();
+        
+        // Determine which token we need to pay based on the deltas
+        if (amount0Delta > 0) {
+            swap = Swap({
+                dexType: DexType.UniswapV3,
+                poolAddr: msg.sender,
+                tokenIn: token0,
+                tokenOut: token1,
+                amountIn: uint256(amount0Delta)
+            });
+        } else if (amount1Delta > 0) {
+            swap = Swap({
+                dexType: DexType.UniswapV3,
+                poolAddr: msg.sender,
+                tokenIn: token1,
+                tokenOut: token0,
+                amountIn: uint256(amount1Delta)
+            });
+        } else {
+            revert("Invalid amountDeltas");
+        }
+
+        SafeTransferLib.safeTransfer(ERC20(swap.tokenIn), swap.poolAddr, swap.amountIn);
     }
 
     function getUniswapV2AmountOut(
@@ -297,33 +346,112 @@ contract BoomerSwapSolver2 is SolverBase, ReentrancyGuard {
     }
 
     // Add a function to withdraw any token in case of emergency
-    function withdrawToken(address token, uint256 amount) external nonReentrant {
+    function withdrawToken(address token, uint256 amount) external {
         require(msg.sender == _owner, "INVALID ENTRY");
         SafeTransferLib.safeTransfer(ERC20(token), _owner, amount);
     }
     
     // Make the WETH withdrawal function more secure
-    function withdrawWeth(uint256 amount) external nonReentrant {
+    function withdrawWeth(uint256 amount) external {
         require(msg.sender == _owner, "INVALID ENTRY");
         SafeTransferLib.safeTransfer(ERC20(WETH_ADDRESS), _owner, amount);
     }
     
     // Add a function to withdraw ETH if needed
-    function withdrawETH(uint256 amount) external nonReentrant {
+    function withdrawETH(uint256 amount) external {
         require(msg.sender == _owner, "INVALID ENTRY");
         require(address(this).balance >= amount, "Insufficient ETH balance");
         (bool success, ) = _owner.call{value: amount}("");
         require(success, "ETH transfer failed");
     }
-
-    function balanceOf(address token) internal view returns (uint256) {
-        if (token == WETH_ADDRESS) {
-            return address(this).balance;
-        } else {
-            return ERC20(token).balanceOf(address(this));
-        }
-    }
     
     // Allow the contract to receive ETH
     receive() external payable {}
 }
+
+// import { SafeTransferLib } from "solady/utils/SafeTransferLib.sol";
+// import { IERC20 } from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+
+// import { IAtlas } from "../interfaces/IAtlas.sol";
+// import { ISolverContract } from "../interfaces/ISolverContract.sol";
+
+// import "../types/SolverOperation.sol";
+
+// interface IWETH9 {
+//     function deposit() external payable;
+//     function withdraw(uint256 wad) external payable;
+// }
+
+// /**
+//  * @title SolverBase
+//  * @notice A base contract for Solvers
+//  * @dev Does safety checks, escrow reconciliation and pays bids.
+//  * @dev Works with DAppControls which have set the `invertBidValue` flag to false.
+//  * @dev Use `SolverBaseInvertBid` for DAppControls which have set the `invertBidValue` flag to true.
+//  */
+// contract SolverBase is ISolverContract {
+//     address public immutable WETH_ADDRESS;
+//     address internal immutable _owner;
+//     address internal immutable _atlas;
+
+//     error SolverCallUnsuccessful();
+//     error InvalidEntry();
+//     error InvalidCaller();
+
+//     constructor(address weth, address atlas, address owner) {
+//         WETH_ADDRESS = weth;
+//         _owner = owner;
+//         _atlas = atlas;
+//     }
+
+//     function atlasSolverCall(
+//         address solverOpFrom,
+//         address executionEnvironment,
+//         address bidToken,
+//         uint256 bidAmount,
+//         bytes calldata solverOpData,
+//         bytes calldata forwardedData
+//     )
+//         external
+//         payable
+//         virtual
+//         safetyFirst(executionEnvironment, solverOpFrom)
+//         payBids(executionEnvironment, bidToken, bidAmount)
+//     {
+//         (bool success,) = address(this).call{ value: msg.value }(solverOpData);
+//         if (!success) revert SolverCallUnsuccessful();
+//     }
+
+//     modifier safetyFirst(address executionEnvironment, address solverOpFrom) {
+//         // Safety checks
+//         if (msg.sender != _atlas) revert InvalidEntry();
+//         if (solverOpFrom != _owner) revert InvalidCaller();
+
+//         _;
+
+//         (uint256 gasLiability, uint256 borrowLiability) = IAtlas(_atlas).shortfall();
+//         uint256 nativeRepayment = borrowLiability < msg.value ? borrowLiability : msg.value;
+
+//         IAtlas(_atlas).reconcile{ value: nativeRepayment }(gasLiability);
+//     }
+
+//     modifier payBids(address executionEnvironment, address bidToken, uint256 bidAmount) {
+//         _;
+
+//         // After the solverCall logic has executed, pay the solver's bid to the Execution Environment of the current
+//         // metacall tx.
+        
+
+//         if (bidToken == address(0)) {
+//             // Pay bid in ETH
+//             uint256 currentBalance = address(this).balance;
+
+//             SafeTransferLib.safeTransferETH(executionEnvironment, currentBalance);
+//         } else {
+//             uint256 currentBalance = IERC20(bidToken).balanceOf(address(this));
+//             // Pay bid in ERC20 (bidToken)
+//             SafeTransferLib.safeTransfer(bidToken, executionEnvironment, currentBalance);
+//         }
+//     }
+// }
+

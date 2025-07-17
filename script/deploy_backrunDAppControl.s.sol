@@ -6,7 +6,7 @@ import "forge-std/Test.sol";
 
 import { BackrunDAppControl } from "src/BackrunDAppControl.sol";
 import { AtlasVerification } from "@atlas/atlas/AtlasVerification.sol";
-import { IShMonad } from "src/interfaces/IShMonad.sol";
+
 
 contract DeployBackrunDAppControlScript is Test {
     function run() external {
@@ -20,14 +20,12 @@ contract DeployBackrunDAppControlScript is Test {
         address atlasAddress = vm.envAddress("ATLAS_ADDRESS");
         address atlasVerificationAddress = vm.envAddress("ATLAS_VERIFICATION_ADDRESS");
         address auctioneer = vm.envAddress("AUCTIONEER_ADDRESS");
-        address shMonadAddress = vm.envAddress("SHMONAD_ADDRESS");
+        
 
-        IShMonad shMonad = IShMonad(shMonadAddress);
 
         require(atlasAddress != address(0), "ATLAS_ADDRESS is not set");
         require(atlasVerificationAddress != address(0), "ATLAS_VERIFICATION_ADDRESS is not set");
         require(auctioneer != address(0), "AUCTIONEER_ADDRESS is not set");
-        require(shMonadAddress != address(0), "SHMONAD_ADDRESS is not set");
 
         console.log("Using Atlas deployed at: \t\t\t", atlasAddress);
         console.log("Using Atlas Verification deployed at: \t", atlasVerificationAddress);
@@ -38,13 +36,8 @@ contract DeployBackrunDAppControlScript is Test {
 
         vm.startBroadcast(deployerPrivateKey);
 
-        (uint64 policyId, ) = shMonad.createPolicy(10);
-        console.log("policyId", policyId);
-        console.log("owner", shMonad.owner());
-        shMonad.depositAndBond{value: 10 ether}(policyId, deployer, type(uint256).max);
-
         // BackrunDAppControl backrunDAppControl = BackrunDAppControl(0x874daAdd2C6253f94fDeA28b4F8d904F470165a4);
-        BackrunDAppControl backrunDAppControl = new BackrunDAppControl(shMonadAddress, atlasAddress, auctioneer, 1000, policyId);
+        BackrunDAppControl backrunDAppControl = new BackrunDAppControl(atlasAddress, auctioneer, 1000);
 
         AtlasVerification(atlasVerificationAddress).initializeGovernance(address(backrunDAppControl));
         AtlasVerification(atlasVerificationAddress).addSignatory(address(backrunDAppControl), auctioneer);

@@ -18,6 +18,7 @@ contract DeployBoomerSwapSolver2Script is Script {
         console.log("Deploying BoomerSwapSolver2...");
         console.log("Deployer address:", deployer);
         console.log("WETH address:", wethAddress);
+        console.log("Atlas address:", atlas);
         console.log("===============================");
 
         vm.startBroadcast(deployerPrivateKey);

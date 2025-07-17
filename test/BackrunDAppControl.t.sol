@@ -28,7 +28,6 @@ address constant SHMONAD_ADDRESS = 0x3a98250F98Dd388C211206983453837C8365BDc1;
 IUniswapV2Router02 constant ROUTER = IUniswapV2Router02(SWAP_ROUTER);
 IAtlas constant ATLAS = IAtlas(ATLAS_ADDRESS);
 IAtlasVerification constant ATLAS_VERIFICATION = IAtlasVerification(ATLAS_VERIFICATION_ADDRESS);
-IShMonad constant SHMONAD = IShMonad(SHMONAD_ADDRESS);
 
 address constant poolA = 0x7C6E266292850471951F2AAb3C486692F9828289; // uniswap v2
 address constant poolB = 0x73f7328343fB94602ca0e2580C441a444facA565; // uniswap v2
@@ -63,7 +62,8 @@ contract BackrunDAppControlTest is Test {
     uint256 solverBidAmountETH = 0.001 ether;
     uint256 solverBidAmount = 15000 ether;
     uint256 solverAmountIn = 0.03 ether;
-
+    uint256 solverGas = 500_000;
+    uint256 userGas = 400_000;
     Sig sig;
 
     function setUp() public virtual {
@@ -72,18 +72,11 @@ contract BackrunDAppControlTest is Test {
 
         vm.deal(governanceEOA, 100 ether);
         vm.startPrank(governanceEOA);
-        (uint64 policyId, ) = SHMONAD.createPolicy(10);
-        
-        SHMONAD.depositAndBond{value: 10 ether}(policyId, governanceEOA, type(uint256).max);
 
-        control = new BackrunDAppControl(SHMONAD_ADDRESS, ATLAS_ADDRESS, governanceEOA, 1000, policyId); //50% gov payout
+        control = new BackrunDAppControl(ATLAS_ADDRESS, governanceEOA, 1000); //50% gov payout
         ATLAS_VERIFICATION.initializeGovernance(payable(address(control)));
         control.addRouter(address(ROUTER));
         
-        vm.stopPrank();
-
-        vm.startPrank(SHMONAD.owner());
-        SHMONAD.addPolicyAgent(policyId, payable(address(control)));
         vm.stopPrank();
 
         solverPK = vm.envUint("USER_PRIVATE_KEY");
@@ -103,7 +96,6 @@ contract BackrunDAppControlTest is Test {
         _path1[0] = weth;
         _path1[1] = rare;
 
-        console.log("owner", SHMONAD.owner());
     }
 
     function test_swapExactTokensForTokens() public {
@@ -135,9 +127,8 @@ contract BackrunDAppControlTest is Test {
         bytes memory userOpData = abi.encodeWithSelector(
             BackrunDAppControl.swap.selector,
             swapInfo,
-            address(0),
-            0
-            // control.getDAppGasLimit()
+            refundRecipient,
+            1000
         );
 
         uint256 msgValue = bundlerGasEth;
@@ -152,18 +143,16 @@ contract BackrunDAppControlTest is Test {
 
         uint256 userTokenBalanceBefore = _balanceOf(_path1[1], userEOA);
         
-        uint256 gasLimit = calculateGasLimit(control, solverOps.length, userOp.gas);
+        uint256 gasLimit = calculateGasLimit(control, solverOps.length, userOp.gas, solverGas);
         console.log("gasLimit", gasLimit);
 
         vm.startPrank(userEOA);
         IERC20(_path1[0]).approve(address(ATLAS), amountIn);
         
-        uint256 gasBefore = gasleft();
         uint256 userBalanceBefore = _balanceOf(NATIVE_TOKEN, userEOA);
+        uint256 gasBefore = gasleft();
         ATLAS.metacall{ value: msgValue, gas: gasLimit }(userOp, solverOps, dAppOp, address(0));
         uint256 gasAfter = gasleft();
-        // uint256 userBalanceAfter = _balanceOf(NATIVE_TOKEN, userEOA);
-        // console.log("user balance change", userBalanceAfter - userBalanceBefore);
         console.log("gas used", gasBefore - gasAfter);
     
         vm.stopPrank();
@@ -172,6 +161,10 @@ contract BackrunDAppControlTest is Test {
 
         console.log("User SMON balance change:", userTokenBalanceAfter - userTokenBalanceBefore);
         assertGt(userTokenBalanceAfter - userTokenBalanceBefore, 0);
+
+        uint256 refundAmount = _balanceOf(bidToken, refundRecipient);
+        console.log("refund amount", refundAmount);
+        assertGt(refundAmount, 0);
     }
 
     function test_swapExactETHForTokens() public {
@@ -202,9 +195,8 @@ contract BackrunDAppControlTest is Test {
         bytes memory userOpData = abi.encodeWithSelector(
             BackrunDAppControl.swap.selector,
             swapInfo,
-            address(0),
-            0
-            // control.getDAppGasLimit()
+            refundRecipient,
+            1000
         );
 
         uint256 msgValue = amountIn;
@@ -219,7 +211,7 @@ contract BackrunDAppControlTest is Test {
 
         uint256 userTokenBalanceBefore = _balanceOf(_path1[1], userEOA);
         
-        uint256 gasLimit = calculateGasLimit(control, solverOps.length, userOp.gas);
+        uint256 gasLimit = calculateGasLimit(control, solverOps.length, userOp.gas, solverGas);
         console.log("gasLimit", gasLimit);
 
         vm.startPrank(userEOA);
@@ -235,6 +227,10 @@ contract BackrunDAppControlTest is Test {
 
         console.log("User SMON balance change:", userTokenBalanceAfter - userTokenBalanceBefore);
         assertGt(userTokenBalanceAfter - userTokenBalanceBefore, 0);
+
+        uint256 refundAmount = _balanceOf(bidToken, refundRecipient);
+        console.log("refund amount", refundAmount);
+        assertGt(refundAmount, 0);
     }
 
     // balanceOf helper that supports ERC20 and native token
@@ -266,15 +262,15 @@ contract BackrunDAppControlTest is Test {
         });
 
         userOp.sessionKey = governanceEOA;
-        userOp.gas = 400_000;
+        userOp.gas = userGas;
 
         // build solver operation
-        solverOps = new SolverOperation[](0);
+        solverOps = new SolverOperation[](1);
         SolverOperation memory solverOp;
         address solverContract;
 
         (solverContract, solverOp) = _setUpSolver(solverEOA, solverPK, solverBidAmount, userOp, bidToken, swapPath);        
-        // solverOps[0] = solverOp;
+        solverOps[0] = solverOp;
 
         // build dApp operation
         dAppOp = txBuilder.buildDAppOperation(governanceEOA, userOp, solverOps);
@@ -322,13 +318,14 @@ contract BackrunDAppControlTest is Test {
         // Builds the SolverOperation
         solverOp = txBuilder.buildSolverOperation({
             userOp: userOp,
-            solverOpData: abi.encodeCall(BoomerSwapSolver.execute, (swapPath, solverAmountIn, solverBidAmountETH, 0)),
+            solverOpData: abi.encodeCall(BoomerSwapSolver.execute, (swapPath, solverAmountIn, bidAmount, 0)),
             solver: solverEOA,
             solverContract: address(solverContract),
             bidAmount: bidAmount,
             value: 0
         });
         solverOp.bidToken = bidToken;
+        solverOp.gas = solverGas;
 
         // Sign solverOp
         (sig.v, sig.r, sig.s) = vm.sign(solverPK, ATLAS_VERIFICATION.getSolverPayload(solverOp));
@@ -345,7 +342,8 @@ contract BackrunDAppControlTest is Test {
     function calculateGasLimit(
         BackrunDAppControl control,
         uint256 solverOpsLength,
-        uint256 userOpGas
+        uint256 userOpGas,
+        uint256 solverGas
     ) internal view returns (uint256) {
         // Constants
         uint256 _BASE_TX_GAS_USED = 21000;
@@ -355,8 +353,8 @@ contract BackrunDAppControlTest is Test {
         
         // Get limits from control
         uint256 dappGasLimit = control.getDAppGasLimit();
-        uint256 solverGasLimit = control.getSolverGasLimit();
-        uint256 allSolversExecutionGas = solverGasLimit * solverOpsLength;
+        // uint256 solverGasLimit = control.getSolverGasLimit();
+        uint256 allSolversExecutionGas = solverGas * solverOpsLength;
         
         // Calculate total gas limit
         return userOpGas + 

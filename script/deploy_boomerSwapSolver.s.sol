@@ -17,6 +17,8 @@ contract DeployBoomerSwapSolverScript is Script {
 
         console.log("===============================");
         console.log("Deploying BoomerSwapSolver...");
+        console.log("Atlas address:", atlas);
+        console.log("Shmonad address:", shmonad);
         console.log("Deployer address:", deployer);
         console.log("WETH address:", wethAddress);
         console.log("===============================");

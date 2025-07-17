@@ -232,7 +232,7 @@ contract UniswapV2DAppControlTest is Test {
         // Builds the SolverOperation
         solverOp = txBuilder.buildSolverOperation({
             userOp: userOp,
-            solverOpData: abi.encodeCall(BoomerSwapSolver.execute, (swapPath, solverAmountIn, bidAmount, boostYieldPct)),
+            solverOpData: abi.encodeCall(BoomerSwapSolver.execute, (swapPath, solverAmountIn,bidAmount, 0)),
             solver: solverEOA,
             solverContract: address(solverContract),
             bidAmount: bidAmount,
