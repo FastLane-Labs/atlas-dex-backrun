@@ -36,30 +36,34 @@ contract DeployBackrunDAppControlScript is Test {
 
         vm.startBroadcast(deployerPrivateKey);
 
-        // BackrunDAppControl backrunDAppControl = BackrunDAppControl(0x874daAdd2C6253f94fDeA28b4F8d904F470165a4);
         BackrunDAppControl backrunDAppControl = new BackrunDAppControl(atlasAddress, auctioneer, 1000);
 
         AtlasVerification(atlasVerificationAddress).initializeGovernance(address(backrunDAppControl));
         AtlasVerification(atlasVerificationAddress).addSignatory(address(backrunDAppControl), auctioneer);
 
-        address SWAP_ROUTER1 = 0x88B96aF200c8a9c35442C8AC6cd3D22695AaE4F0; // Uniswap V2 Router
-        address SWAP_ROUTER2 = 0xCa810D095e90Daae6e867c19DF6D9A8C56db2c89; // Uniswap V2 Router
-        address SWAP_ROUTER3 = 0x0000000000001fF3684f28c67538d4D072C22734;
-        address SWAP_ROUTER4 = 0x0f2D067f8438869da670eFc855eACAC71616ca31; 
-        backrunDAppControl.addRouter(SWAP_ROUTER1);
-        backrunDAppControl.addRouter(SWAP_ROUTER2);
-        backrunDAppControl.addRouter(SWAP_ROUTER3);
-        backrunDAppControl.addRouter(SWAP_ROUTER4);
-        bool isRouterWhitelisted = backrunDAppControl.isRouterWhitelisted(SWAP_ROUTER1);
-        console.log("isRouterWhitelisted", isRouterWhitelisted);
-        isRouterWhitelisted = backrunDAppControl.isRouterWhitelisted(SWAP_ROUTER2);
-        console.log("isRouterWhitelisted", isRouterWhitelisted);
-        isRouterWhitelisted = backrunDAppControl.isRouterWhitelisted(SWAP_ROUTER3);
-        console.log("isRouterWhitelisted", isRouterWhitelisted);
-        isRouterWhitelisted = backrunDAppControl.isRouterWhitelisted(SWAP_ROUTER4);
-        console.log("isRouterWhitelisted", isRouterWhitelisted);
-        // shMonad.transferOwnership(payable(address(backrunDAppControl)));
+        address ambientRouter = 0x88B96aF200c8a9c35442C8AC6cd3D22695AaE4F0; // Ambient
+        address beanRouter = 0xCa810D095e90Daae6e867c19DF6D9A8C56db2c89; // Bean
+        address atlantisRouter = 0x0000000000001fF3684f28c67538d4D072C22734; // Atlantis
+        address bubblefiRouter = 0x0f2D067f8438869da670eFc855eACAC71616ca31; // Bubblefi
+        address cloberRouter = 0xfD845859628946B317A78A9250DA251114FbD846; // Clober
+        address octoswapRouter = 0x8B1fb7B1da49F111A2C0C11925D5bB86a2fab88E; // Octoswap
+        
+        //add routers
+        backrunDAppControl.addRouter(ambientRouter);
+        backrunDAppControl.addRouter(beanRouter);
+        backrunDAppControl.addRouter(atlantisRouter);
+        backrunDAppControl.addRouter(bubblefiRouter);
+        backrunDAppControl.addRouter(cloberRouter);
+        backrunDAppControl.addRouter(octoswapRouter);
 
+        //check if routers are whitelisted
+        require(backrunDAppControl.isRouterWhitelisted(ambientRouter), "Ambient router not whitelisted");
+        require(backrunDAppControl.isRouterWhitelisted(beanRouter), "Bean router not whitelisted");
+        require(backrunDAppControl.isRouterWhitelisted(atlantisRouter), "Atlantis router not whitelisted");
+        require(backrunDAppControl.isRouterWhitelisted(bubblefiRouter), "Bubblefi router not whitelisted");
+        require(backrunDAppControl.isRouterWhitelisted(cloberRouter), "Clober router not whitelisted");
+        require(backrunDAppControl.isRouterWhitelisted(octoswapRouter), "Octoswap router not whitelisted");
+        
         vm.stopBroadcast();
 
         console.log("Contracts deployed by deployer:");
