@@ -53,16 +53,16 @@ contract DeployBackrunDAppControlScript is Test {
         backrunDAppControl.addRouter(beanRouter);
         backrunDAppControl.addRouter(atlantisRouter);
         backrunDAppControl.addRouter(bubblefiRouter);
-        backrunDAppControl.addRouter(cloberRouter);
         backrunDAppControl.addRouter(octoswapRouter);
+        backrunDAppControl.addRouter(cloberRouter);
 
         //check if routers are whitelisted
         require(backrunDAppControl.isRouterWhitelisted(ambientRouter), "Ambient router not whitelisted");
         require(backrunDAppControl.isRouterWhitelisted(beanRouter), "Bean router not whitelisted");
         require(backrunDAppControl.isRouterWhitelisted(atlantisRouter), "Atlantis router not whitelisted");
         require(backrunDAppControl.isRouterWhitelisted(bubblefiRouter), "Bubblefi router not whitelisted");
-        require(backrunDAppControl.isRouterWhitelisted(cloberRouter), "Clober router not whitelisted");
         require(backrunDAppControl.isRouterWhitelisted(octoswapRouter), "Octoswap router not whitelisted");
+        require(backrunDAppControl.isRouterWhitelisted(cloberRouter), "Clober router not whitelisted");
         
         vm.stopBroadcast();
 

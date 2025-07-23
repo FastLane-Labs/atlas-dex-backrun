@@ -90,7 +90,8 @@ contract UniswapV3DAppControl is DAppControl {
                 trustedOpHash: true,
                 invertBidValue: false,
                 exPostBids: true,
-                multipleSuccessfulSolvers: false
+                multipleSuccessfulSolvers: false,
+                checkMetacallGasLimit: false
             })
         )
     {
