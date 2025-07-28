@@ -13,6 +13,7 @@
   isolate         = false
   gas_reports     = []
   fs_permissions  = [{ access = "read-write", path = "./" }]
+  via_ir = true
 
 [profile.ci]
   fuzz      = { runs = 10_000 }
