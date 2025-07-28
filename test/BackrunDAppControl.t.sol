@@ -16,21 +16,17 @@ import { IAtlasVerification } from "../src/interfaces/IAtlasVerification.sol";
 import { IERC20 } from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 
 import { BackrunDAppControl, SwapTokenInfo } from "../src/BackrunDAppControl.sol";
-import { BoomerSwapSolver, Swap, DexType } from "../src/BoomerSwapSolver.sol";
 import { IShMonad } from "../src/interfaces/IShMonad.sol";
 
 // Uniswap V2 mainnet addresses
 address constant SWAP_ROUTER = 0xCa810D095e90Daae6e867c19DF6D9A8C56db2c89; // Uniswap V2 Router
-address payable constant ATLAS_ADDRESS = payable(0x4a730A56344873FB28f7C3d65A67Fea56f5e0F46);
-address constant ATLAS_VERIFICATION_ADDRESS = 0x834B181d1F4Cd9Ec61E02D0DF0E5e4F944eFA508;
+address payable constant ATLAS_ADDRESS = payable(0xbB010Cb7e71D44d7323aE1C267B333A48D05907C);
+address constant ATLAS_VERIFICATION_ADDRESS = 0x1D388b1B87E3fbd08cF30e54b4Bcaf21052d90a9;
 address constant SHMONAD_ADDRESS = 0x3a98250F98Dd388C211206983453837C8365BDc1;
 
 IUniswapV2Router02 constant ROUTER = IUniswapV2Router02(SWAP_ROUTER);
 IAtlas constant ATLAS = IAtlas(ATLAS_ADDRESS);
 IAtlasVerification constant ATLAS_VERIFICATION = IAtlasVerification(ATLAS_VERIFICATION_ADDRESS);
-
-address constant poolA = 0x7C6E266292850471951F2AAb3C486692F9828289; // uniswap v2
-address constant poolB = 0x73f7328343fB94602ca0e2580C441a444facA565; // uniswap v2
 
 address constant weth = 0x760AfE86e5de5fa0Ee542fc7B7B713e1c5425701;
 address constant rare = 0x7607a128d6b8447e587660D9565d824804c0EAD7; 
@@ -133,25 +129,17 @@ contract BackrunDAppControlTest is Test {
 
         uint256 msgValue = bundlerGasEth;
 
-        Swap[] memory swapPath = new Swap[](3);
-        swapPath[0] = Swap(DexType.UniswapV2, poolA, weth, rare);
-        swapPath[1] = Swap(DexType.UniswapV2, poolB, rare, weth);
-        swapPath[2] = Swap(DexType.UniswapV2, poolA, weth, rare);
-
         (UserOperation memory userOp, SolverOperation[] memory solverOps, DAppOperation memory dAppOp) =
-            buildOperations(userOpData, msgValue, bidToken, swapPath);
+            buildOperations(userOpData, msgValue, bidToken);
 
         uint256 userTokenBalanceBefore = _balanceOf(_path1[1], userEOA);
-        
-        uint256 gasLimit = calculateGasLimit(control, solverOps.length, userOp.gas, solverGas);
-        console.log("gasLimit", gasLimit);
 
         vm.startPrank(userEOA);
         IERC20(_path1[0]).approve(address(ATLAS), amountIn);
         
         uint256 userBalanceBefore = _balanceOf(NATIVE_TOKEN, userEOA);
         uint256 gasBefore = gasleft();
-        ATLAS.metacall{ value: msgValue, gas: gasLimit }(userOp, solverOps, dAppOp, address(0));
+        ATLAS.metacall{ value: msgValue }(userOp, solverOps, dAppOp, address(0));
         uint256 gasAfter = gasleft();
         console.log("gas used", gasBefore - gasAfter);
     
@@ -201,23 +189,15 @@ contract BackrunDAppControlTest is Test {
 
         uint256 msgValue = amountIn;
 
-        Swap[] memory swapPath = new Swap[](3);
-        swapPath[0] = Swap(DexType.UniswapV2, poolA, weth, rare);
-        swapPath[1] = Swap(DexType.UniswapV2, poolB, rare, weth);
-        swapPath[2] = Swap(DexType.UniswapV2, poolA, weth, rare);
-
         (UserOperation memory userOp, SolverOperation[] memory solverOps, DAppOperation memory dAppOp) =
-            buildOperations(userOpData, msgValue, bidToken, swapPath);
+            buildOperations(userOpData, msgValue, bidToken);
 
         uint256 userTokenBalanceBefore = _balanceOf(_path1[1], userEOA);
-        
-        uint256 gasLimit = calculateGasLimit(control, solverOps.length, userOp.gas, solverGas);
-        console.log("gasLimit", gasLimit);
 
         vm.startPrank(userEOA);
         
         uint256 gasBefore = gasleft();
-        ATLAS.metacall{ value: msgValue, gas: gasLimit }(userOp, solverOps, dAppOp, address(0));
+        ATLAS.metacall{ value: msgValue }(userOp, solverOps, dAppOp, address(0));
         uint256 gasAfter = gasleft();
         console.log("gas used", gasBefore - gasAfter);
     
@@ -245,8 +225,7 @@ contract BackrunDAppControlTest is Test {
     function buildOperations(
         bytes memory userOpData,
         uint256 msgValue,
-        address bidToken,
-        Swap[] memory swapPath
+        address bidToken
     )
         internal
         returns (UserOperation memory userOp, SolverOperation[] memory solverOps, DAppOperation memory dAppOp)
@@ -269,7 +248,7 @@ contract BackrunDAppControlTest is Test {
         SolverOperation memory solverOp;
         address solverContract;
 
-        (solverContract, solverOp) = _setUpSolver(solverEOA, solverPK, solverBidAmount, userOp, bidToken, swapPath);        
+        (solverContract, solverOp) = _setUpSolver(solverEOA, solverPK, solverBidAmount, userOp, bidToken);        
         solverOps[0] = solverOp;
 
         // build dApp operation
@@ -286,18 +265,18 @@ contract BackrunDAppControlTest is Test {
         uint256 solverPK,
         uint256 bidAmount,
         UserOperation memory userOp,
-        address bidToken,
-        Swap[] memory swapPath
+        address bidToken
     )
         internal
         returns (address solverContract, SolverOperation memory solverOp)
     { 
         vm.startPrank(userEOA);
-        BoomerSwapSolver solver = new BoomerSwapSolver(weth, ATLAS_ADDRESS, SHMONAD_ADDRESS);
+        SimpleSolver solver = new SimpleSolver(weth, ATLAS_ADDRESS);
         deal(weth, address(solver), 100 ether);
+        deal(bidToken, address(solver), bidAmount);
 
         // Create signed solverOp
-        solverOp = _buildSolverOp(solverEOA, solverPK, address(solver), bidAmount, userOp, bidToken, swapPath);
+        solverOp = _buildSolverOp(solverEOA, solverPK, address(solver), bidAmount, userOp, bidToken);
         vm.stopPrank();
 
         return (address(solver), solverOp);
@@ -309,8 +288,7 @@ contract BackrunDAppControlTest is Test {
         address solverContract,
         uint256 bidAmount,
         UserOperation memory userOp,
-        address bidToken,
-        Swap[] memory swapPath
+        address bidToken
     )
         internal
         returns (SolverOperation memory solverOp)
@@ -318,7 +296,7 @@ contract BackrunDAppControlTest is Test {
         // Builds the SolverOperation
         solverOp = txBuilder.buildSolverOperation({
             userOp: userOp,
-            solverOpData: abi.encodeCall(BoomerSwapSolver.execute, (swapPath, solverAmountIn, bidAmount, 0)),
+            solverOpData: abi.encodeCall(SimpleSolver.solve, ()),
             solver: solverEOA,
             solverContract: address(solverContract),
             bidAmount: bidAmount,
@@ -331,38 +309,38 @@ contract BackrunDAppControlTest is Test {
         (sig.v, sig.r, sig.s) = vm.sign(solverPK, ATLAS_VERIFICATION.getSolverPayload(solverOp));
         solverOp.signature = abi.encodePacked(sig.r, sig.s, sig.v);
     }
+}
 
-    /**
-     * @notice Calculates the total gas limit needed for an Atlas transaction
-     * @param control The DAppControl contract
-     * @param solverOpsLength The number of solver operations
-     * @param userOpGas The gas specified in the user operation
-     * @return The calculated gas limit for the transaction
-     */
-    function calculateGasLimit(
-        BackrunDAppControl control,
-        uint256 solverOpsLength,
-        uint256 userOpGas,
-        uint256 solverGas
-    ) internal view returns (uint256) {
-        // Constants
-        uint256 _BASE_TX_GAS_USED = 21000;
-        uint256 FIXED_GAS_OFFSET = 150000;
-        uint256 LOWER_BASE_EXEC_GAS_TOLERANCE = 60_000;
-        uint256 TOLERANCE_PER_SOLVER = 33_000;
-        
-        // Get limits from control
-        uint256 dappGasLimit = control.getDAppGasLimit();
-        // uint256 solverGasLimit = control.getSolverGasLimit();
-        uint256 allSolversExecutionGas = solverGas * solverOpsLength;
-        
-        // Calculate total gas limit
-        return userOpGas + 
-               dappGasLimit + 
-               allSolversExecutionGas + 
-               _BASE_TX_GAS_USED + 
-               FIXED_GAS_OFFSET - 
-               LOWER_BASE_EXEC_GAS_TOLERANCE + 
-               TOLERANCE_PER_SOLVER * solverOpsLength;
+// Just bids `bidAmount` in ETH token - doesn't do anything else
+contract SimpleSolver is SolverBase {
+    bool internal s_shouldSucceed;
+
+    constructor(address weth, address atlas) SolverBase(weth, atlas, msg.sender) {
+        s_shouldSucceed = true; // should succeed by default, can be set to false
     }
+
+    function shouldSucceed() public view returns (bool) {
+        return s_shouldSucceed;
+    }
+
+    function setShouldSucceed(bool succeed) public {
+        s_shouldSucceed = succeed;
+    }
+
+    function solve() public view onlySelf {
+        require(s_shouldSucceed, "Solver failed intentionally");
+
+        // The solver bid representing user's minAmountUserBuys of tokenUserBuys is sent to the
+        // Execution Environment in the payBids modifier logic which runs after this function ends.
+    }
+
+    // This ensures a function can only be called through atlasSolverCall
+    // which includes security checks to work safely with Atlas
+    modifier onlySelf() {
+        require(msg.sender == address(this), "Not called via atlasSolverCall");
+        _;
+    }
+
+    fallback() external payable { }
+    receive() external payable { }
 }

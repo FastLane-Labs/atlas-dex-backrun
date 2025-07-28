@@ -4,7 +4,7 @@ pragma solidity 0.8.28;
 import { IERC4626Custom } from "./IERC4626Custom.sol";
 import { IERC20Full } from "./IERC20Full.sol";
 
-import { Policy } from "../Types.sol";
+import { Policy } from "../utils/Types.sol";
 import { IERC4626Custom } from "./IERC4626Custom.sol";
 import { IERC20Full } from "./IERC20Full.sol";
 
