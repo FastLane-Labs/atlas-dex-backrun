@@ -18,8 +18,7 @@ import { IERC20 } from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol"
 import { BackrunDAppControl, SwapTokenInfo } from "../src/BackrunDAppControl.sol";
 import { IShMonad } from "../src/interfaces/IShMonad.sol";
 
-// Uniswap V2 mainnet addresses
-address constant SWAP_ROUTER = 0xCa810D095e90Daae6e867c19DF6D9A8C56db2c89; // Uniswap V2 Router
+address constant SWAP_ROUTER = 0xCa810D095e90Daae6e867c19DF6D9A8C56db2c89; // Bean DEX
 address payable constant ATLAS_ADDRESS = payable(0xbB010Cb7e71D44d7323aE1C267B333A48D05907C);
 address constant ATLAS_VERIFICATION_ADDRESS = 0x1D388b1B87E3fbd08cF30e54b4Bcaf21052d90a9;
 address constant SHMONAD_ADDRESS = 0x3a98250F98Dd388C211206983453837C8365BDc1;
@@ -54,10 +53,7 @@ contract BackrunDAppControlTest is Test {
     address[] _path1 = new address[](2);
     address[] _path2 = new address[](2);
     uint256 amountIn = 0.1 ether;
-    uint256 bundlerGasEth = 0.000001 ether;
-    uint256 solverBidAmountETH = 0.001 ether;
     uint256 solverBidAmount = 15000 ether;
-    uint256 solverAmountIn = 0.03 ether;
     uint256 solverGas = 500_000;
     uint256 userGas = 400_000;
     Sig sig;
@@ -71,7 +67,7 @@ contract BackrunDAppControlTest is Test {
 
         control = new BackrunDAppControl(ATLAS_ADDRESS, governanceEOA, 1000); //50% gov payout
         ATLAS_VERIFICATION.initializeGovernance(payable(address(control)));
-        control.addRouter(address(ROUTER));
+        control.addRouter(address(ROUTER), 1);
         
         vm.stopPrank();
 
@@ -91,6 +87,10 @@ contract BackrunDAppControlTest is Test {
         // Set up token paths for swaps
         _path1[0] = weth;
         _path1[1] = rare;
+        
+        // Set up reverse path for RARE to WETH swaps
+        _path2[0] = rare;
+        _path2[1] = weth;
 
     }
 
@@ -127,7 +127,7 @@ contract BackrunDAppControlTest is Test {
             1000
         );
 
-        uint256 msgValue = bundlerGasEth;
+        uint256 msgValue = 0;
 
         (UserOperation memory userOp, SolverOperation[] memory solverOps, DAppOperation memory dAppOp) =
             buildOperations(userOpData, msgValue, bidToken);
@@ -213,6 +213,67 @@ contract BackrunDAppControlTest is Test {
         assertGt(refundAmount, 0);
     }
 
+    function test_swapExactTokensForETH() public {
+        // User wants to swap exact RARE for ETH
+        bytes memory swapData = abi.encodeWithSelector(
+            0x18cbafe5, // swapExactTokensForETH selector
+            amountIn,         // amountIn
+            1,                // amountOutMin (low for testing)
+            _path2,           // path (RARE -> WETH)
+            userEOA, // to
+            block.timestamp * 2 // deadline
+        );
+
+        bool bidTokenIsOutputToken = false; // ETH is output token, so bid token is not output token
+        address bidToken = bidTokenIsOutputToken ? weth : NATIVE_TOKEN;
+
+        SwapTokenInfo memory swapInfo = SwapTokenInfo({
+            inputToken: rare,
+            inputAmount: amountIn,
+            outputToken: NATIVE_TOKEN,
+            outputMin: 1,
+            bidTokenIsOutputToken: bidTokenIsOutputToken,
+            target: address(ROUTER),
+            swapData: swapData
+        });
+
+        address refundRecipient = makeAddr("REFUND_RECIPIENT");
+
+        bytes memory userOpData = abi.encodeWithSelector(
+            BackrunDAppControl.swap.selector,
+            swapInfo,
+            refundRecipient,
+            1000
+        );
+
+        uint256 msgValue = 0;
+
+        (UserOperation memory userOp, SolverOperation[] memory solverOps, DAppOperation memory dAppOp) =
+            buildOperations(userOpData, msgValue, bidToken);
+
+        deal(rare, userEOA, amountIn);
+        uint256 userEthBalanceBefore = _balanceOf(NATIVE_TOKEN, userEOA);
+
+        vm.startPrank(userEOA);
+        IERC20(rare).approve(address(ATLAS), amountIn);
+        
+        uint256 gasBefore = gasleft();
+        ATLAS.metacall{ value: msgValue }(userOp, solverOps, dAppOp, address(0));
+        uint256 gasAfter = gasleft();
+        console.log("gas used", gasBefore - gasAfter);
+    
+        vm.stopPrank();
+
+        uint256 userEthBalanceAfter = _balanceOf(NATIVE_TOKEN, userEOA);
+
+        console.log("User ETH balance change:", userEthBalanceAfter - userEthBalanceBefore);
+        assertGt(userEthBalanceAfter - userEthBalanceBefore, 0);
+
+        uint256 refundAmount = _balanceOf(bidToken, refundRecipient);
+        console.log("refund amount", refundAmount);
+        assertGt(refundAmount, 0);
+    }
+
     // balanceOf helper that supports ERC20 and native token
     function _balanceOf(address token, address account) internal view returns (uint256) {
         if (token == NATIVE_TOKEN) {
@@ -273,7 +334,13 @@ contract BackrunDAppControlTest is Test {
         vm.startPrank(userEOA);
         SimpleSolver solver = new SimpleSolver(weth, ATLAS_ADDRESS);
         deal(weth, address(solver), 100 ether);
-        deal(bidToken, address(solver), bidAmount);
+        
+        // Handle native token (ETH) differently from ERC20 tokens
+        if (bidToken == NATIVE_TOKEN) {
+            vm.deal(address(solver), bidAmount);
+        } else {
+            deal(bidToken, address(solver), bidAmount);
+        }
 
         // Create signed solverOp
         solverOp = _buildSolverOp(solverEOA, solverPK, address(solver), bidAmount, userOp, bidToken);

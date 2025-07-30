@@ -47,22 +47,25 @@ contract DeployBackrunDAppControlScript is Test {
         address bubblefiRouter = 0x0f2D067f8438869da670eFc855eACAC71616ca31; // Bubblefi
         address cloberRouter = 0xfD845859628946B317A78A9250DA251114FbD846; // Clober
         address octoswapRouter = 0x8B1fb7B1da49F111A2C0C11925D5bB86a2fab88E; // Octoswap
+        address monorailRouter = 0x525B929fCd6a64AfF834f4eeCc6E860486cED700; // Monorail
         
         //add routers
-        backrunDAppControl.addRouter(ambientRouter);
-        backrunDAppControl.addRouter(beanRouter);
-        backrunDAppControl.addRouter(atlantisRouter);
-        backrunDAppControl.addRouter(bubblefiRouter);
-        backrunDAppControl.addRouter(octoswapRouter);
-        backrunDAppControl.addRouter(cloberRouter);
+        backrunDAppControl.addRouter(ambientRouter, 1);
+        backrunDAppControl.addRouter(beanRouter, 1);
+        backrunDAppControl.addRouter(atlantisRouter, 1);
+        backrunDAppControl.addRouter(bubblefiRouter, 1);
+        backrunDAppControl.addRouter(octoswapRouter, 1);
+        backrunDAppControl.addRouter(cloberRouter, 1);
+        backrunDAppControl.addRouter(monorailRouter, 1);
 
         //check if routers are whitelisted
-        require(backrunDAppControl.isRouterWhitelisted(ambientRouter), "Ambient router not whitelisted");
-        require(backrunDAppControl.isRouterWhitelisted(beanRouter), "Bean router not whitelisted");
-        require(backrunDAppControl.isRouterWhitelisted(atlantisRouter), "Atlantis router not whitelisted");
-        require(backrunDAppControl.isRouterWhitelisted(bubblefiRouter), "Bubblefi router not whitelisted");
-        require(backrunDAppControl.isRouterWhitelisted(octoswapRouter), "Octoswap router not whitelisted");
-        require(backrunDAppControl.isRouterWhitelisted(cloberRouter), "Clober router not whitelisted");
+        require(backrunDAppControl.isRouterWhitelisted(ambientRouter) != 0, "Ambient router not whitelisted");
+        require(backrunDAppControl.isRouterWhitelisted(beanRouter) != 0, "Bean router not whitelisted");
+        require(backrunDAppControl.isRouterWhitelisted(atlantisRouter) != 0, "Atlantis router not whitelisted");
+        require(backrunDAppControl.isRouterWhitelisted(bubblefiRouter) != 0, "Bubblefi router not whitelisted");
+        require(backrunDAppControl.isRouterWhitelisted(octoswapRouter) != 0, "Octoswap router not whitelisted");
+        require(backrunDAppControl.isRouterWhitelisted(cloberRouter) != 0, "Clober router not whitelisted");
+        require(backrunDAppControl.isRouterWhitelisted(monorailRouter) != 0, "Monorail router not whitelisted");
         
         vm.stopBroadcast();
 
