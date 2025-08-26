@@ -20,24 +20,16 @@ struct SwapTokenInfo {
 
 contract BackrunDAppControl is DAppControl {
     uint256 internal constant BPS_SCALE = 10_000; //basis points denominator
-    uint32 internal constant DAPP_GAS_LIMIT = 3_000_000;
+    uint32 internal constant DAPP_GAS_LIMIT = 10_000_000;
     address internal constant _ETH = address(0); // address of the ETH token
 
     uint256 public govPercent;
     address public govPayoutAddr;
 
-    // 0: not available
-    // 1: transfer to EE and approve router
-    // 2: transfer directly to router, no approval needed
-    uint8 internal constant ROUTER_TYPE_NONE = 0;
-    uint8 internal constant ROUTER_TYPE_APPROVE = 1;
-    uint8 internal constant ROUTER_TYPE_DIRECT = 2;
-    mapping(address => uint8) public routerWhitelist;
-
     // Transient storage variables for refund handling
     address transient internal t_refundRecipient;
     uint256 transient internal t_refundPercent;
-
+    address transient internal t_bidToken;
     // Add a new event to log bid token changes
     event GovernancePayoutAddressUpdated(address indexed oldGovPayoutAddr, address indexed newGovPayoutAddr);
     event GovernancePayoutSplitUpdated(uint256 oldPercentage, uint256 newPercentage);
@@ -45,10 +37,6 @@ contract BackrunDAppControl is DAppControl {
     // allocate value hook events
     event UserPayout(address indexed user, uint256 amount, address bidToken);
     event GovernancePayout(address indexed govPayoutAddr, uint256 amount, address bidToken);
-
-    // router events
-    event RouterAdded(address indexed router, uint8 routerType);
-    event RouterRemoved(address indexed router);
 
     event SwapSuccess(address indexed target, address indexed inputToken, address indexed outputToken, uint256 inputAmount, uint256 outputAmount);
 
@@ -63,8 +51,6 @@ contract BackrunDAppControl is DAppControl {
     error WrongBidToken();
     error GovPercentExceedsScale();
     error GovPayoutAddrZero();
-    error InvalidRouterType();
-    error RouterZeroAddress();
 
     /**
      * @notice Constructor for BackrunDAppControl
@@ -145,117 +131,54 @@ contract BackrunDAppControl is DAppControl {
         emit GovernancePayoutSplitUpdated(govPercent, _govPercent);
     }
 
-    /**
-     * @notice Adds a router to the whitelist
-     * @param _router The address of the router to add to the whitelist
-     * @param _type The router type (1: approve, 2: direct)
-     * @dev This function can only be called by the governance
-     */
-    function addRouter(address _router, uint8 _type) external onlyGovernance {
-        require(_type == ROUTER_TYPE_APPROVE || _type == ROUTER_TYPE_DIRECT, InvalidRouterType());
-        require(_router != address(0), RouterZeroAddress());
-        routerWhitelist[_router] = _type;
-        emit RouterAdded(_router, _type);
-    }
-
-    /**
-     * @notice Removes a router from the whitelist
-     * @param _router The address of the router to remove from the whitelist
-     * @dev This function can only be called by the governance
-     */
-    function removeRouter(address _router) external onlyGovernance {
-        routerWhitelist[_router] = ROUTER_TYPE_NONE;
-        emit RouterRemoved(_router);
-    }
-
     // ---------------------------------------------------- //
     //                  ENTRYPOINT FUNCTION                 //
     // ---------------------------------------------------- //
 
     /**
-     * @notice Swaps tokens using the provided swap info
-     * @param _swapInfo The swap info containing the input token, input amount, output token, output min, and target
+     * @notice Swaps tokens using the provided parameters
+     * @param _bidToken The bid token address
      * @param _refundRecipient The address that will receive the refund
      * @param _refundPercent The percentage of the bid amount that goes to the refund recipient
-     * @dev Entry point function handles ETH swaps and preOps call handles erc20 swaps
+     * @dev Entry point function does nothing, preOps call handles refund recipient
      */
     function swap(
-        SwapTokenInfo calldata _swapInfo,
+        address _bidToken,
         address _refundRecipient,
         uint256 _refundPercent
-    ) external payable {
-        // If the input token is ETH, call the swap function with msg.value
-        if (_swapInfo.inputToken == _ETH) {
-            require(msg.value == _swapInfo.inputAmount, InsufficientUserOpValue());
-
-            _executeSwap(
-                _swapInfo.target,
-                _ETH,
-                _swapInfo.outputToken,
-                _swapInfo.inputAmount,
-                _swapInfo.outputMin,
-                _swapInfo.swapData,
-                _user()
-            );
-        }
-    }
+    ) external payable { /* USEROP DOESNT DO ANYTHING */  }
     
     // ---------------------------------------------------- //
     //                     ATLAS HOOKS                      //
     // ---------------------------------------------------- //
 
     function _preOpsCall(UserOperation calldata userOp) internal virtual override returns (bytes memory) {
-        (SwapTokenInfo memory _swapInfo, address _refundRecipient, uint256 _refundPercent) 
-            = abi.decode(userOp.data[4:], (SwapTokenInfo, address, uint256));
+        (address _bidToken, address _refundRecipient, uint256 _refundPercent) 
+            = abi.decode(userOp.data[4:], (address, address, uint256));
         require(_refundPercent <= BPS_SCALE - 1000, GovPercentExceedsScale());
 
-        _setRefundParams(_refundRecipient, _refundPercent);
-
-        uint8 _routerWhitelist = BackrunDAppControl(payable(CONTROL)).isRouterWhitelisted(_swapInfo.target); 
-        require(_routerWhitelist != ROUTER_TYPE_NONE, UserOpDappNotSwapRouter());
-
-        // If inputToken is ERC20, transfer tokens from user to EE, and approve router for swap
-        if (_swapInfo.inputToken != _ETH) {
-            if (_routerWhitelist == ROUTER_TYPE_APPROVE) {
-                _transferUserERC20(_swapInfo.inputToken, address(this), _swapInfo.inputAmount);
-                SafeTransferLib.safeApprove(_swapInfo.inputToken, _swapInfo.target, _swapInfo.inputAmount);
-            } else if (_routerWhitelist == ROUTER_TYPE_DIRECT) {
-                _transferUserERC20(_swapInfo.inputToken, _swapInfo.target, _swapInfo.inputAmount);
-            } else {
-                revert UserOpDappNotSwapRouter();
-            }
-
-            _executeSwap(
-                _swapInfo.target,
-                _swapInfo.inputToken,
-                _swapInfo.outputToken,
-                _swapInfo.inputAmount,
-                _swapInfo.outputMin,
-                _swapInfo.swapData,
-                userOp.from
-            );
-        }         
+        _setRefundParams(_refundRecipient, _refundPercent);    
 
         return userOp.data[4:]; 
     }
 
     function _preSolverCall(SolverOperation calldata solverOp, bytes calldata data) internal virtual override {
-        (SwapTokenInfo memory _swapInfo, , ) = abi.decode(data, (SwapTokenInfo, address, uint256));
-        if (solverOp.bidToken != _swapInfo.outputToken) revert WrongBidToken();
+        (address _bidToken, , ) = abi.decode(data, (address, address, uint256));
+        if (solverOp.bidToken != _bidToken) revert WrongBidToken();
     }
 
-    function _allocateValueCall(bool solverSuccess, address _bidToken, uint256 bidAmount, bytes calldata) internal virtual override {
+    function _allocateValueCall(bool, address _bidToken, uint256 bidAmount, bytes calldata) internal virtual override {
         (address _refundRecipient, uint256 _refundPercent) = _getRefundParams();
         (address _govPayoutAddr, uint256 _govPercent) = BackrunDAppControl(payable(CONTROL)).getPayoutData();
         require(_govPercent + _refundPercent <= BPS_SCALE, GovPercentExceedsScale());
 
-        uint256 _outputTokenBalance = _balanceOf(address(this), _bidToken);
-        require(_outputTokenBalance >= bidAmount, InsufficientOutputBalance());
+        uint256 _bidTokenBalance = _balanceOf(address(this), _bidToken);
+        require(_bidTokenBalance >= bidAmount, InsufficientOutputBalance());
 
         // Calculate governance, refund, and user amounts
-        uint256 govPayoutAmount = (_outputTokenBalance * _govPercent) / BPS_SCALE;
-        uint256 refundAmount = (_outputTokenBalance * _refundPercent) / BPS_SCALE;
-        uint256 userAmount = _outputTokenBalance - govPayoutAmount - refundAmount;
+        uint256 govPayoutAmount = (_bidTokenBalance * _govPercent) / BPS_SCALE;
+        uint256 refundAmount = (_bidTokenBalance * _refundPercent) / BPS_SCALE;
+        uint256 userAmount = _bidTokenBalance - govPayoutAmount - refundAmount;
         
         // Transfer governance amount to payout address if not zero
         if (govPayoutAmount > 0) {
@@ -281,8 +204,8 @@ contract BackrunDAppControl is DAppControl {
     // ---------------------------------------------------- //
 
     function getBidFormat(UserOperation calldata userOp) public view virtual override returns (address) {
-        (SwapTokenInfo memory _swapInfo, , ) = abi.decode(userOp.data[4:], (SwapTokenInfo, address, uint256));
-        return _swapInfo.bidTokenIsOutputToken ? _swapInfo.outputToken : _ETH;
+        (address _bidToken, , ) = abi.decode(userOp.data[4:], (address, address, uint256));
+        return _bidToken;
     }
 
     function getBidValue(SolverOperation calldata solverOp) public view virtual override returns (uint256) {
@@ -291,10 +214,6 @@ contract BackrunDAppControl is DAppControl {
 
     function getPayoutData() public view returns (address, uint256) {
         return (govPayoutAddr, govPercent);
-    }
-
-    function isRouterWhitelisted(address _router) public view returns (uint8) {
-        return routerWhitelist[_router];
     }
 
     function getDAppGasLimit() public view virtual override returns (uint32) {
@@ -307,32 +226,6 @@ contract BackrunDAppControl is DAppControl {
     // ---------------------------------------------------- //
     //                    INTERNAL FUNCTIONS                //
     // ---------------------------------------------------- //
-
-    function _executeSwap(
-        address target,
-        address inputToken,
-        address outputToken,
-        uint256 inputAmount,
-        uint256 outputMin,
-        bytes memory swapData,
-        address user
-    ) internal returns (uint256 amountOut) {
-        uint256 outputTokenBalanceBefore = _balanceOf(user, outputToken);
-
-        (bool success, ) = target.call{value: inputToken == _ETH ? inputAmount : 0}(swapData);
-        require(success, SwapFailed());
-
-        uint256 eeBalance = _balanceOf(address(this), outputToken);
-        if (eeBalance > 0) {
-            _transferToken(outputToken, user, eeBalance);
-        }
-
-        uint256 outputTokenBalanceAfter = _balanceOf(user, outputToken);
-        amountOut = outputTokenBalanceAfter - outputTokenBalanceBefore;
-        require(amountOut >= outputMin, InsufficientOutputBalance());
-        
-        emit SwapSuccess(target, inputToken, outputToken, inputAmount, amountOut);
-    }
 
     function _balanceOf(address _user, address token) internal view returns (uint256) {
         if (token == _ETH) {

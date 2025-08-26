@@ -31,6 +31,100 @@ address constant weth = 0x760AfE86e5de5fa0Ee542fc7B7B713e1c5425701;
 address constant rare = 0x7607a128d6b8447e587660D9565d824804c0EAD7; 
 address constant NATIVE_TOKEN = address(0);
 
+/**
+ * @title EIP-7702 Smart Wallet Implementation
+ * @notice This contract implements EIP-7702 functionality for atomic execution
+ * of approve, swap, and metacall operations
+ */
+contract EIP7702SmartWallet {
+    uint256 public nonce;
+    mapping(address => bool) public authorizedImplementations;
+    
+    event ExecutionSuccess(bytes32 indexed operationHash, uint256 indexed nonce);
+    event ImplementationAuthorized(address indexed implementation, bool authorized);
+    
+    error InvalidSignature();
+    error UnauthorizedImplementation();
+    error InvalidNonce();
+    
+    constructor() {
+        // Initialize with nonce 0
+        nonce = 0;
+    }
+    
+    /**
+     * @notice Authorize an implementation contract to execute on behalf of this wallet
+     * @param implementation The address of the implementation contract
+     * @param authorized Whether to authorize or revoke authorization
+     */
+    function authorizeImplementation(address implementation, bool authorized) external {
+        // In a real implementation, this would be restricted to the wallet owner
+        authorizedImplementations[implementation] = authorized;
+        emit ImplementationAuthorized(implementation, authorized);
+    }
+    
+    /**
+     * @notice Execute a batch of operations atomically
+     * @param calls Array of call data to execute
+     * @param signature The signature authorizing this execution
+     */
+    function execute(CallData[] calldata calls, bytes calldata signature) external payable {
+        // Verify the signature
+        bytes32 operationHash = keccak256(abi.encodePacked(nonce, abi.encode(calls)));
+        bytes32 messageHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", operationHash));
+        
+        (bytes32 r, bytes32 s, uint8 v) = _splitSignature(signature);
+        address signer = ecrecover(messageHash, v, r, s);
+        
+        // In a real implementation, verify the signer is authorized
+        if (signer == address(0)) revert InvalidSignature();
+        
+        // Increment nonce to prevent replay attacks
+        nonce++;
+        
+        // Execute all calls atomically
+        for (uint256 i = 0; i < calls.length; i++) {
+            CallData calldata call = calls[i];
+            
+            // Verify the target is an authorized implementation
+            if (!authorizedImplementations[call.target]) revert UnauthorizedImplementation();
+            
+            // Execute the call
+            (bool success, bytes memory result) = call.target.call{value: call.value}(call.data);
+            require(success, "Call execution failed");
+        }
+        
+        emit ExecutionSuccess(operationHash, nonce - 1);
+    }
+    
+    /**
+     * @notice Split signature into r, s, v components
+     */
+    function _splitSignature(bytes calldata signature) internal pure returns (bytes32 r, bytes32 s, uint8 v) {
+        require(signature.length == 65, "Invalid signature length");
+        
+        assembly {
+            r := calldataload(add(signature.offset, 0x00))
+            s := calldataload(add(signature.offset, 0x20))
+            v := byte(0, calldataload(add(signature.offset, 0x40)))
+        }
+    }
+    
+    // Fallback function to receive ETH
+    receive() external payable {}
+}
+
+/**
+ * @title CallData struct for EIP-7702 operations
+ */
+struct CallData {
+    address target;
+    uint256 value;
+    bytes data;
+}
+
+
+
 contract BackrunDAppControlTest is Test {
     struct Sig {
         uint8 v;
@@ -43,6 +137,7 @@ contract BackrunDAppControlTest is Test {
     TxBuilder txBuilder;
 
     BackrunDAppControl control;
+    EIP7702SmartWallet smartWallet;
 
     address solverEOA;
     uint256 solverPK;
@@ -67,7 +162,6 @@ contract BackrunDAppControlTest is Test {
 
         control = new BackrunDAppControl(ATLAS_ADDRESS, governanceEOA, 1000); //50% gov payout
         ATLAS_VERIFICATION.initializeGovernance(payable(address(control)));
-        control.addRouter(address(ROUTER), 1);
         
         vm.stopPrank();
 
@@ -92,186 +186,102 @@ contract BackrunDAppControlTest is Test {
         _path2[0] = rare;
         _path2[1] = weth;
 
+        // Deploy EIP-7702 smart wallet
+        vm.startPrank(userEOA);
+        smartWallet = new EIP7702SmartWallet();
+        
+        // Authorize Atlas and Router for the smart wallet
+        smartWallet.authorizeImplementation(address(ATLAS), true);
+        smartWallet.authorizeImplementation(address(ROUTER), true);
+        smartWallet.authorizeImplementation(weth, true);
+        vm.stopPrank();
     }
 
-    function test_swapExactTokensForTokens() public {
-        // User wants to swap exact WETH for SMON
+    function test_EIP7702_AtomicBackrunWithMetacall() public {
+        // Fund the smart wallet
+        vm.deal(address(smartWallet), 10 ether);
+        deal(weth, address(smartWallet), 1000 ether);
+        
+        // User wants to swap exact WETH for RARE (same logic as test_swapExactTokensForTokens)
         bytes memory swapData = abi.encodeWithSelector(
             0x38ed1739, // swapExactTokensForTokens selector
             amountIn,         // amountIn
             1,                // amountOutMin (low for testing)
             _path1,           // path
-            userEOA, // to
+            address(smartWallet), // to (smart wallet receives the tokens)
             block.timestamp * 2 // deadline
         );
 
-        bool bidTokenIsOutputToken = true;
-        address bidToken = bidTokenIsOutputToken ? rare : NATIVE_TOKEN;
-
-        SwapTokenInfo memory swapInfo = SwapTokenInfo({
-            inputToken: weth,
-            inputAmount: amountIn,
-            outputToken: rare,
-            outputMin: 1,
-            bidTokenIsOutputToken: bidTokenIsOutputToken,
-            target: address(ROUTER),
-            swapData: swapData
-        });
-
         address refundRecipient = makeAddr("REFUND_RECIPIENT");
+        address bidToken = rare; // RARE is the bid token
 
         bytes memory userOpData = abi.encodeWithSelector(
             BackrunDAppControl.swap.selector,
-            swapInfo,
+            bidToken,
             refundRecipient,
             1000
         );
 
         uint256 msgValue = 0;
 
+        // Build operations using the existing approach
         (UserOperation memory userOp, SolverOperation[] memory solverOps, DAppOperation memory dAppOp) =
             buildOperations(userOpData, msgValue, bidToken);
 
-        uint256 userTokenBalanceBefore = _balanceOf(_path1[1], userEOA);
-
-        vm.startPrank(userEOA);
-        IERC20(_path1[0]).approve(address(ATLAS), amountIn);
+        // Create the three operations for EIP-7702 atomic execution
+        CallData[] memory calls = new CallData[](3);
         
-        uint256 userBalanceBefore = _balanceOf(NATIVE_TOKEN, userEOA);
-        uint256 gasBefore = gasleft();
-        ATLAS.metacall{ value: msgValue }(userOp, solverOps, dAppOp, address(0));
-        uint256 gasAfter = gasleft();
-        console.log("gas used", gasBefore - gasAfter);
-    
-        vm.stopPrank();
-
-        uint256 userTokenBalanceAfter = _balanceOf(_path1[1], userEOA);
-
-        console.log("User SMON balance change:", userTokenBalanceAfter - userTokenBalanceBefore);
-        assertGt(userTokenBalanceAfter - userTokenBalanceBefore, 0);
-
-        uint256 refundAmount = _balanceOf(bidToken, refundRecipient);
-        console.log("refund amount", refundAmount);
-        assertGt(refundAmount, 0);
-    }
-
-    function test_swapExactETHForTokens() public {
-        // User wants to swap exact ETH for SMON
-        bytes memory swapData = abi.encodeWithSelector(
-            0x7ff36ab5, // swapExactETHForTokens selector
-            1,                // amountOutMin (low for testing)
-            _path1,           // path
-            userEOA, // to
-            block.timestamp * 2 // deadline
-        );
-
-        bool bidTokenIsOutputToken = true;
-        address bidToken = bidTokenIsOutputToken ? rare : NATIVE_TOKEN;
-
-        SwapTokenInfo memory swapInfo = SwapTokenInfo({
-            inputToken: NATIVE_TOKEN,
-            inputAmount: amountIn,
-            outputToken: rare,
-            outputMin: 1,
-            bidTokenIsOutputToken: bidTokenIsOutputToken,
-            target: address(ROUTER),
-            swapData: swapData
+        // Operation 1: Approve WETH for router
+        calls[0] = CallData({
+            target: weth,
+            value: 0,
+            data: abi.encodeWithSelector(IERC20.approve.selector, address(ROUTER), amountIn)
         });
-
-        address refundRecipient = makeAddr("REFUND_RECIPIENT");
-
-        bytes memory userOpData = abi.encodeWithSelector(
-            BackrunDAppControl.swap.selector,
-            swapInfo,
-            refundRecipient,
-            1000
-        );
-
-        uint256 msgValue = amountIn;
-
-        (UserOperation memory userOp, SolverOperation[] memory solverOps, DAppOperation memory dAppOp) =
-            buildOperations(userOpData, msgValue, bidToken);
-
-        uint256 userTokenBalanceBefore = _balanceOf(_path1[1], userEOA);
-
-        vm.startPrank(userEOA);
         
-        uint256 gasBefore = gasleft();
-        ATLAS.metacall{ value: msgValue }(userOp, solverOps, dAppOp, address(0));
-        uint256 gasAfter = gasleft();
-        console.log("gas used", gasBefore - gasAfter);
-    
-        vm.stopPrank();
-
-        uint256 userTokenBalanceAfter = _balanceOf(_path1[1], userEOA);
-
-        console.log("User SMON balance change:", userTokenBalanceAfter - userTokenBalanceBefore);
-        assertGt(userTokenBalanceAfter - userTokenBalanceBefore, 0);
-
-        uint256 refundAmount = _balanceOf(bidToken, refundRecipient);
-        console.log("refund amount", refundAmount);
-        assertGt(refundAmount, 0);
-    }
-
-    function test_swapExactTokensForETH() public {
-        // User wants to swap exact RARE for ETH
-        bytes memory swapData = abi.encodeWithSelector(
-            0x18cbafe5, // swapExactTokensForETH selector
-            amountIn,         // amountIn
-            1,                // amountOutMin (low for testing)
-            _path2,           // path (RARE -> WETH)
-            userEOA, // to
-            block.timestamp * 2 // deadline
-        );
-
-        bool bidTokenIsOutputToken = false; // ETH is output token, so bid token is not output token
-        address bidToken = bidTokenIsOutputToken ? weth : NATIVE_TOKEN;
-
-        SwapTokenInfo memory swapInfo = SwapTokenInfo({
-            inputToken: rare,
-            inputAmount: amountIn,
-            outputToken: NATIVE_TOKEN,
-            outputMin: 1,
-            bidTokenIsOutputToken: bidTokenIsOutputToken,
+        // Operation 2: Execute swap on router
+        calls[1] = CallData({
             target: address(ROUTER),
-            swapData: swapData
+            value: 0,
+            data: swapData
         });
-
-        address refundRecipient = makeAddr("REFUND_RECIPIENT");
-
-        bytes memory userOpData = abi.encodeWithSelector(
-            BackrunDAppControl.swap.selector,
-            swapInfo,
-            refundRecipient,
-            1000
-        );
-
-        uint256 msgValue = 0;
-
-        (UserOperation memory userOp, SolverOperation[] memory solverOps, DAppOperation memory dAppOp) =
-            buildOperations(userOpData, msgValue, bidToken);
-
-        deal(rare, userEOA, amountIn);
-        uint256 userEthBalanceBefore = _balanceOf(NATIVE_TOKEN, userEOA);
-
-        vm.startPrank(userEOA);
-        IERC20(rare).approve(address(ATLAS), amountIn);
         
-        uint256 gasBefore = gasleft();
-        ATLAS.metacall{ value: msgValue }(userOp, solverOps, dAppOp, address(0));
-        uint256 gasAfter = gasleft();
-        console.log("gas used", gasBefore - gasAfter);
-    
-        vm.stopPrank();
-
-        uint256 userEthBalanceAfter = _balanceOf(NATIVE_TOKEN, userEOA);
-
-        console.log("User ETH balance change:", userEthBalanceAfter - userEthBalanceBefore);
-        assertGt(userEthBalanceAfter - userEthBalanceBefore, 0);
-
-        uint256 refundAmount = _balanceOf(bidToken, refundRecipient);
-        console.log("refund amount", refundAmount);
-        assertGt(refundAmount, 0);
+        // Operation 3: Execute metacall (solver operations only, no swap)
+        calls[2] = CallData({
+            target: address(ATLAS),
+            value: msgValue,
+            data: abi.encodeWithSelector(ATLAS.metacall.selector, userOp, solverOps, dAppOp, address(0))
+        });
+        
+        // Sign the operation
+        bytes32 operationHash = keccak256(abi.encodePacked(smartWallet.nonce(), abi.encode(calls)));
+        bytes32 messageHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", operationHash));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(userPK, messageHash);
+        bytes memory signature = abi.encodePacked(r, s, v);
+        
+        // Record balances before execution
+        uint256 smartWalletWethBefore = IERC20(weth).balanceOf(address(smartWallet));
+        uint256 smartWalletRareBefore = IERC20(rare).balanceOf(address(smartWallet));
+        
+        // Execute the EIP-7702 atomic transaction
+        vm.prank(userEOA);
+        smartWallet.execute(calls, signature);
+        
+        // Verify the atomic execution was successful
+        uint256 smartWalletWethAfter = IERC20(weth).balanceOf(address(smartWallet));
+        uint256 smartWalletRareAfter = IERC20(rare).balanceOf(address(smartWallet));
+        
+        // Check that WETH was spent
+        assertLt(smartWalletWethAfter, smartWalletWethBefore);
+        
+        // Check that RARE was received
+        assertGt(smartWalletRareAfter, smartWalletRareBefore);
+        
+        // Verify nonce was incremented (replay protection)
+        assertEq(smartWallet.nonce(), 1);
+        
+        console.log("EIP-7702 Atomic Backrun with Metacall successful!");
+        console.log("WETH spent:", smartWalletWethBefore - smartWalletWethAfter);
+        console.log("RARE received:", smartWalletRareAfter - smartWalletRareBefore);
     }
 
     // balanceOf helper that supports ERC20 and native token
@@ -293,7 +303,7 @@ contract BackrunDAppControlTest is Test {
     {
         // build user operation
         userOp = txBuilder.buildUserOperation({
-            from: userEOA,
+            from: address(smartWallet),
             to: payable(address(control)),
             maxFeePerGas: tx.gasprice + 1,
             value: msgValue,
@@ -314,7 +324,7 @@ contract BackrunDAppControlTest is Test {
 
         // build dApp operation
         dAppOp = txBuilder.buildDAppOperation(governanceEOA, userOp, solverOps);
-        dAppOp.bundler = userEOA;
+        dAppOp.bundler = address(smartWallet);
 
         (sig.v, sig.r, sig.s) = vm.sign(governancePK, ATLAS_VERIFICATION.getDAppOperationPayload(dAppOp));
         dAppOp.signature = abi.encodePacked(sig.r, sig.s, sig.v);
@@ -375,6 +385,47 @@ contract BackrunDAppControlTest is Test {
         // Sign solverOp
         (sig.v, sig.r, sig.s) = vm.sign(solverPK, ATLAS_VERIFICATION.getSolverPayload(solverOp));
         solverOp.signature = abi.encodePacked(sig.r, sig.s, sig.v);
+    }
+
+    // Helper function to build solver operations for EIP-7702 tests
+    function _buildSolverOperations() internal returns (SolverOperation[] memory) {
+        SolverOperation[] memory solverOps = new SolverOperation[](1);
+        
+        // Create a simple solver operation
+        SolverOperation memory solverOp = txBuilder.buildSolverOperation({
+            userOp: _buildUserOperation(),
+            solverOpData: abi.encodeCall(SimpleSolver.solve, ()),
+            solver: solverEOA,
+            solverContract: address(_deploySimpleSolver()),
+            bidAmount: solverBidAmount,
+            value: 0
+        });
+        solverOp.bidToken = weth;
+        solverOp.gas = solverGas;
+        
+        // Sign solverOp
+        (sig.v, sig.r, sig.s) = vm.sign(solverPK, ATLAS_VERIFICATION.getSolverPayload(solverOp));
+        solverOp.signature = abi.encodePacked(sig.r, sig.s, sig.v);
+        
+        solverOps[0] = solverOp;
+        return solverOps;
+    }
+    
+    function _buildUserOperation() internal view returns (UserOperation memory) {
+        return txBuilder.buildUserOperation({
+            from: address(smartWallet),
+            to: payable(address(control)),
+            maxFeePerGas: tx.gasprice + 1,
+            value: 0,
+            deadline: block.number + 20000,
+            data: ""
+        });
+    }
+    
+    function _deploySimpleSolver() internal returns (SimpleSolver) {
+        SimpleSolver solver = new SimpleSolver(weth, ATLAS_ADDRESS);
+        deal(weth, address(solver), 100 ether);
+        return solver;
     }
 }
 
