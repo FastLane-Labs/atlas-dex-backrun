@@ -4,3 +4,4 @@ solady/=lib/solady/src/
 @atlas-test/=lib/atlas/test/
 @uniswap/=lib
 @openzeppelin/=lib/openzeppelin-contracts
+solmate/=lib/solmate/src/

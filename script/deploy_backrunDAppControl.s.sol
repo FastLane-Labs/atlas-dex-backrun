@@ -7,7 +7,6 @@ import "forge-std/Test.sol";
 import { BackrunDAppControl } from "src/BackrunDAppControl.sol";
 import { AtlasVerification } from "@atlas/atlas/AtlasVerification.sol";
 
-
 contract DeployBackrunDAppControlScript is Test {
     function run() external {
         console.log("\n=== DEPLOYING Backrun DAPP CONTROL ===\n");
@@ -20,8 +19,6 @@ contract DeployBackrunDAppControlScript is Test {
         address atlasAddress = vm.envAddress("ATLAS_ADDRESS");
         address atlasVerificationAddress = vm.envAddress("ATLAS_VERIFICATION_ADDRESS");
         address auctioneer = vm.envAddress("AUCTIONEER_ADDRESS");
-        
-
 
         require(atlasAddress != address(0), "ATLAS_ADDRESS is not set");
         require(atlasVerificationAddress != address(0), "ATLAS_VERIFICATION_ADDRESS is not set");
@@ -48,7 +45,7 @@ contract DeployBackrunDAppControlScript is Test {
         address cloberRouter = 0xfD845859628946B317A78A9250DA251114FbD846; // Clober
         address octoswapRouter = 0x8B1fb7B1da49F111A2C0C11925D5bB86a2fab88E; // Octoswap
         address monorailRouter = 0x525B929fCd6a64AfF834f4eeCc6E860486cED700; // Monorail
-        
+
         //add routers
         backrunDAppControl.addRouter(ambientRouter, 1);
         backrunDAppControl.addRouter(beanRouter, 1);
@@ -66,7 +63,7 @@ contract DeployBackrunDAppControlScript is Test {
         require(backrunDAppControl.isRouterWhitelisted(octoswapRouter) != 0, "Octoswap router not whitelisted");
         require(backrunDAppControl.isRouterWhitelisted(cloberRouter) != 0, "Clober router not whitelisted");
         require(backrunDAppControl.isRouterWhitelisted(monorailRouter) != 0, "Monorail router not whitelisted");
-        
+
         vm.stopBroadcast();
 
         console.log("Contracts deployed by deployer:");

@@ -49,4 +49,4 @@ library SwapMath {
         uint256 denominator = (reserveIn * 1000) + amountInWithFee;
         amountOut = numerator / denominator;
     }
-} 
+}
