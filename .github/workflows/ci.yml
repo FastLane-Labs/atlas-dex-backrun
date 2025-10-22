@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - monad-final
+  push:
+    branches:
+      - monad-final
+
+env:
+  FOUNDRY_PROFILE: ci
+
+jobs:
+  check:
+    strategy:
+      fail-fast: true
+    name: Foundry project
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Show Forge version
+        run: |
+          forge --version
+
+      - name: Run Forge fmt
+        run: |
+          forge fmt --check
+        id: fmt
+
+      - name: Run Forge build
+        run: |
+          forge build
+        id: build
+
+      - name: Display contract sizes (informational)
+        run: |
+          forge build --sizes || true
+        continue-on-error: true
+
+      - name: Run Forge tests
+        run: |
+          make test-ci
+        id: test
+        env:
+          MONAD_RPC_URL: ${{ secrets.MONAD_RPC_URL }}
+          ATLAS_ADDRESS: ${{ secrets.ATLAS_ADDRESS }}
+          ATLAS_VERIFICATION_ADDRESS: ${{ secrets.ATLAS_VERIFICATION_ADDRESS }}

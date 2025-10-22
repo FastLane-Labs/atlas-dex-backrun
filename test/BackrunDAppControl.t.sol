@@ -2,412 +2,178 @@
 pragma solidity 0.8.28;
 
 import "forge-std/Test.sol";
-import { console } from "forge-std/console.sol";
 
-import { TxBuilder } from "@atlas/helpers/TxBuilder.sol";
-import { SolverOperation } from "@atlas/types/SolverOperation.sol";
-import { UserOperation } from "@atlas/types/UserOperation.sol";
-import { DAppOperation } from "@atlas/types/DAppOperation.sol";
-import { SolverBase } from "@atlas/solver/SolverBase.sol";
-
-import { IUniswapV2Router02 } from "../src/interfaces/IUniswapV2Router.sol";
-import { IAtlas } from "../src/interfaces/IAtlas.sol";
-import { IAtlasVerification } from "../src/interfaces/IAtlasVerification.sol";
-import { IERC20 } from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
-
-import { BackrunDAppControl, SwapTokenInfo } from "../src/BackrunDAppControl.sol";
-import { IShMonad } from "../src/interfaces/IShMonad.sol";
-
-address constant SWAP_ROUTER = 0xCa810D095e90Daae6e867c19DF6D9A8C56db2c89; // Bean DEX
-address payable constant ATLAS_ADDRESS = payable(0xbB010Cb7e71D44d7323aE1C267B333A48D05907C);
-address constant ATLAS_VERIFICATION_ADDRESS = 0x1D388b1B87E3fbd08cF30e54b4Bcaf21052d90a9;
-address constant SHMONAD_ADDRESS = 0x3a98250F98Dd388C211206983453837C8365BDc1;
-
-IUniswapV2Router02 constant ROUTER = IUniswapV2Router02(SWAP_ROUTER);
-IAtlas constant ATLAS = IAtlas(ATLAS_ADDRESS);
-IAtlasVerification constant ATLAS_VERIFICATION = IAtlasVerification(ATLAS_VERIFICATION_ADDRESS);
-
-address constant weth = 0x760AfE86e5de5fa0Ee542fc7B7B713e1c5425701;
-address constant rare = 0x7607a128d6b8447e587660D9565d824804c0EAD7; 
-address constant NATIVE_TOKEN = address(0);
+import { BackrunDAppControl } from "../src/BackrunDAppControl.sol";
+import { TestToken } from "./helpers/TestToken.sol";
 
 contract BackrunDAppControlTest is Test {
-    struct Sig {
-        uint8 v;
-        bytes32 r;
-        bytes32 s;
-    }
+    uint256 private constant GOV_PERCENT_BPS = 1_000; // 10%
+    uint256 private constant REFUND_PERCENT_BPS = 1_000; // 10%
+    uint256 private constant BID_AMOUNT = 1_500 ether;
 
-    address governanceEOA;
-    uint256 governancePK;
-    TxBuilder txBuilder;
+    address private constant DEPLOYER_PK_ADDR = address(0xa11ce);
+    address private constant USER_ADDR = address(0xc0ffee);
+    address private constant REFUND_ADDR = address(0xB0B);
 
-    BackrunDAppControl control;
+    address private atlasAddress;
 
-    address solverEOA;
-    uint256 solverPK;
+    BackrunDAppControlHarness internal harness;
+    TestToken internal bidToken;
 
-    address userEOA;
-    uint256 userPK;
+    function setUp() public {
+        string memory rpcUrl = vm.envString("MONAD_RPC_URL");
+        vm.createSelectFork(rpcUrl);
 
-    address[] _path1 = new address[](2);
-    address[] _path2 = new address[](2);
-    uint256 amountIn = 0.1 ether;
-    uint256 solverBidAmount = 15000 ether;
-    uint256 solverGas = 500_000;
-    uint256 userGas = 400_000;
-    Sig sig;
+        atlasAddress = vm.envAddress("ATLAS_ADDRESS");
 
-    function setUp() public virtual {
-        governancePK = vm.envUint("GOV_PRIVATE_KEY");
-        governanceEOA = vm.addr(governancePK);
+        vm.deal(DEPLOYER_PK_ADDR, 0);
+        vm.deal(USER_ADDR, 0);
+        vm.deal(REFUND_ADDR, 0);
 
-        vm.deal(governanceEOA, 100 ether);
-        vm.startPrank(governanceEOA);
-
-        control = new BackrunDAppControl(ATLAS_ADDRESS, governanceEOA, 1000); //50% gov payout
-        ATLAS_VERIFICATION.initializeGovernance(payable(address(control)));
-        control.addRouter(address(ROUTER), 1);
-        
+        vm.startPrank(DEPLOYER_PK_ADDR);
+        harness = new BackrunDAppControlHarness(atlasAddress, DEPLOYER_PK_ADDR, GOV_PERCENT_BPS);
         vm.stopPrank();
 
-        solverPK = vm.envUint("USER_PRIVATE_KEY");
-        solverEOA = vm.addr(solverPK);
-
-        userPK = vm.envUint("USER_PRIVATE_KEY");
-        userEOA = vm.addr(solverPK);
-
-        // Setup txBuilder helper
-        txBuilder = new TxBuilder({
-            _control: payable(address(control)),
-            _atlas: address(ATLAS),
-            _verification: address(ATLAS_VERIFICATION)
-        });
-
-        // Set up token paths for swaps
-        _path1[0] = weth;
-        _path1[1] = rare;
-        
-        // Set up reverse path for RARE to WETH swaps
-        _path2[0] = rare;
-        _path2[1] = weth;
-
+        bidToken = new TestToken("Bid", "BID");
     }
 
-    function test_swapExactTokensForTokens() public {
-        // User wants to swap exact WETH for SMON
-        bytes memory swapData = abi.encodeWithSelector(
-            0x38ed1739, // swapExactTokensForTokens selector
-            amountIn,         // amountIn
-            1,                // amountOutMin (low for testing)
-            _path1,           // path
-            userEOA, // to
-            block.timestamp * 2 // deadline
-        );
+    function test_constructor_revertsWhenGovAddressZero() public {
+        vm.expectRevert(BackrunDAppControl.GovPayoutAddrZero.selector);
+        new BackrunDAppControlHarness(atlasAddress, address(0), GOV_PERCENT_BPS);
+    }
 
-        bool bidTokenIsOutputToken = true;
-        address bidToken = bidTokenIsOutputToken ? rare : NATIVE_TOKEN;
+    function test_setGovPayoutAddr_emitsOldAndNewValues() public {
+        address newGov = address(0xBEEF);
 
-        SwapTokenInfo memory swapInfo = SwapTokenInfo({
-            inputToken: weth,
-            inputAmount: amountIn,
-            outputToken: rare,
-            outputMin: 1,
-            bidTokenIsOutputToken: bidTokenIsOutputToken,
-            target: address(ROUTER),
-            swapData: swapData
-        });
-
-        address refundRecipient = makeAddr("REFUND_RECIPIENT");
-
-        bytes memory userOpData = abi.encodeWithSelector(
-            BackrunDAppControl.swap.selector,
-            swapInfo,
-            refundRecipient,
-            1000
-        );
-
-        uint256 msgValue = 0;
-
-        (UserOperation memory userOp, SolverOperation[] memory solverOps, DAppOperation memory dAppOp) =
-            buildOperations(userOpData, msgValue, bidToken);
-
-        uint256 userTokenBalanceBefore = _balanceOf(_path1[1], userEOA);
-
-        vm.startPrank(userEOA);
-        IERC20(_path1[0]).approve(address(ATLAS), amountIn);
-        
-        uint256 userBalanceBefore = _balanceOf(NATIVE_TOKEN, userEOA);
-        uint256 gasBefore = gasleft();
-        ATLAS.metacall{ value: msgValue }(userOp, solverOps, dAppOp, address(0));
-        uint256 gasAfter = gasleft();
-        console.log("gas used", gasBefore - gasAfter);
-    
+        vm.startPrank(DEPLOYER_PK_ADDR);
+        vm.expectEmit(true, true, false, true, address(harness));
+        emit BackrunDAppControl.GovernancePayoutAddressUpdated(DEPLOYER_PK_ADDR, newGov);
+        harness.setGovPayoutAddr(newGov);
         vm.stopPrank();
 
-        uint256 userTokenBalanceAfter = _balanceOf(_path1[1], userEOA);
-
-        console.log("User SMON balance change:", userTokenBalanceAfter - userTokenBalanceBefore);
-        assertGt(userTokenBalanceAfter - userTokenBalanceBefore, 0);
-
-        uint256 refundAmount = _balanceOf(bidToken, refundRecipient);
-        console.log("refund amount", refundAmount);
-        assertGt(refundAmount, 0);
+        assertEq(harness.govPayoutAddr(), newGov);
     }
 
-    function test_swapExactETHForTokens() public {
-        // User wants to swap exact ETH for SMON
-        bytes memory swapData = abi.encodeWithSelector(
-            0x7ff36ab5, // swapExactETHForTokens selector
-            1,                // amountOutMin (low for testing)
-            _path1,           // path
-            userEOA, // to
-            block.timestamp * 2 // deadline
-        );
+    function test_setGovPercent_emitsOldAndNewValues() public {
+        uint256 newPercent = 2_000;
 
-        bool bidTokenIsOutputToken = true;
-        address bidToken = bidTokenIsOutputToken ? rare : NATIVE_TOKEN;
-
-        SwapTokenInfo memory swapInfo = SwapTokenInfo({
-            inputToken: NATIVE_TOKEN,
-            inputAmount: amountIn,
-            outputToken: rare,
-            outputMin: 1,
-            bidTokenIsOutputToken: bidTokenIsOutputToken,
-            target: address(ROUTER),
-            swapData: swapData
-        });
-
-        address refundRecipient = makeAddr("REFUND_RECIPIENT");
-
-        bytes memory userOpData = abi.encodeWithSelector(
-            BackrunDAppControl.swap.selector,
-            swapInfo,
-            refundRecipient,
-            1000
-        );
-
-        uint256 msgValue = amountIn;
-
-        (UserOperation memory userOp, SolverOperation[] memory solverOps, DAppOperation memory dAppOp) =
-            buildOperations(userOpData, msgValue, bidToken);
-
-        uint256 userTokenBalanceBefore = _balanceOf(_path1[1], userEOA);
-
-        vm.startPrank(userEOA);
-        
-        uint256 gasBefore = gasleft();
-        ATLAS.metacall{ value: msgValue }(userOp, solverOps, dAppOp, address(0));
-        uint256 gasAfter = gasleft();
-        console.log("gas used", gasBefore - gasAfter);
-    
+        vm.startPrank(DEPLOYER_PK_ADDR);
+        vm.expectEmit(false, false, false, true, address(harness));
+        emit BackrunDAppControl.GovernancePayoutSplitUpdated(GOV_PERCENT_BPS, newPercent);
+        harness.setGovPercent(newPercent);
         vm.stopPrank();
 
-        uint256 userTokenBalanceAfter = _balanceOf(_path1[1], userEOA);
-
-        console.log("User SMON balance change:", userTokenBalanceAfter - userTokenBalanceBefore);
-        assertGt(userTokenBalanceAfter - userTokenBalanceBefore, 0);
-
-        uint256 refundAmount = _balanceOf(bidToken, refundRecipient);
-        console.log("refund amount", refundAmount);
-        assertGt(refundAmount, 0);
+        assertEq(harness.govPercent(), newPercent);
     }
 
-    function test_swapExactTokensForETH() public {
-        // User wants to swap exact RARE for ETH
-        bytes memory swapData = abi.encodeWithSelector(
-            0x18cbafe5, // swapExactTokensForETH selector
-            amountIn,         // amountIn
-            1,                // amountOutMin (low for testing)
-            _path2,           // path (RARE -> WETH)
-            userEOA, // to
-            block.timestamp * 2 // deadline
+    function test_allocateValueCall_distributesErc20() public {
+        uint256 residual = 100 ether;
+        bidToken.mint(address(harness), BID_AMOUNT + residual);
+
+        uint256 govBefore = bidToken.balanceOf(harness.govPayoutAddr());
+        uint256 refundBefore = bidToken.balanceOf(REFUND_ADDR);
+        uint256 userBefore = bidToken.balanceOf(USER_ADDR);
+
+        (bool success, bytes memory returnData) = _callWithAtlasContext(
+            abi.encodeWithSelector(
+                harness.callAllocateValue.selector,
+                address(bidToken),
+                BID_AMOUNT,
+                REFUND_ADDR,
+                REFUND_PERCENT_BPS,
+                bytes("")
+            )
         );
+        _rethrowIfFailed(success, returnData);
 
-        bool bidTokenIsOutputToken = false; // ETH is output token, so bid token is not output token
-        address bidToken = bidTokenIsOutputToken ? weth : NATIVE_TOKEN;
+        uint256 expectedGov = (BID_AMOUNT * GOV_PERCENT_BPS) / 10_000;
+        uint256 expectedRefund = (BID_AMOUNT * REFUND_PERCENT_BPS) / 10_000;
+        uint256 expectedUser = BID_AMOUNT - expectedGov - expectedRefund + residual;
 
-        SwapTokenInfo memory swapInfo = SwapTokenInfo({
-            inputToken: rare,
-            inputAmount: amountIn,
-            outputToken: NATIVE_TOKEN,
-            outputMin: 1,
-            bidTokenIsOutputToken: bidTokenIsOutputToken,
-            target: address(ROUTER),
-            swapData: swapData
-        });
-
-        address refundRecipient = makeAddr("REFUND_RECIPIENT");
-
-        bytes memory userOpData = abi.encodeWithSelector(
-            BackrunDAppControl.swap.selector,
-            swapInfo,
-            refundRecipient,
-            1000
-        );
-
-        uint256 msgValue = 0;
-
-        (UserOperation memory userOp, SolverOperation[] memory solverOps, DAppOperation memory dAppOp) =
-            buildOperations(userOpData, msgValue, bidToken);
-
-        deal(rare, userEOA, amountIn);
-        uint256 userEthBalanceBefore = _balanceOf(NATIVE_TOKEN, userEOA);
-
-        vm.startPrank(userEOA);
-        IERC20(rare).approve(address(ATLAS), amountIn);
-        
-        uint256 gasBefore = gasleft();
-        ATLAS.metacall{ value: msgValue }(userOp, solverOps, dAppOp, address(0));
-        uint256 gasAfter = gasleft();
-        console.log("gas used", gasBefore - gasAfter);
-    
-        vm.stopPrank();
-
-        uint256 userEthBalanceAfter = _balanceOf(NATIVE_TOKEN, userEOA);
-
-        console.log("User ETH balance change:", userEthBalanceAfter - userEthBalanceBefore);
-        assertGt(userEthBalanceAfter - userEthBalanceBefore, 0);
-
-        uint256 refundAmount = _balanceOf(bidToken, refundRecipient);
-        console.log("refund amount", refundAmount);
-        assertGt(refundAmount, 0);
+        assertEq(bidToken.balanceOf(harness.govPayoutAddr()) - govBefore, expectedGov, "gov share");
+        assertEq(bidToken.balanceOf(REFUND_ADDR) - refundBefore, expectedRefund, "refund share");
+        assertEq(bidToken.balanceOf(USER_ADDR) - userBefore, expectedUser, "user share");
+        assertEq(bidToken.balanceOf(address(harness)), 0, "harness drained");
     }
 
-    // balanceOf helper that supports ERC20 and native token
-    function _balanceOf(address token, address account) internal view returns (uint256) {
-        if (token == NATIVE_TOKEN) {
-            return account.balance;
-        } else {
-            return IERC20(token).balanceOf(account);
+    function test_allocateValueCall_distributesNative() public {
+        uint256 residual = 1 ether;
+        vm.deal(address(harness), BID_AMOUNT + residual);
+
+        uint256 govBefore = harness.govPayoutAddr().balance;
+        uint256 refundBefore = REFUND_ADDR.balance;
+        uint256 userBefore = USER_ADDR.balance;
+
+        (bool success, bytes memory returnData) = _callWithAtlasContext(
+            abi.encodeWithSelector(
+                harness.callAllocateValue.selector,
+                address(0),
+                BID_AMOUNT,
+                REFUND_ADDR,
+                REFUND_PERCENT_BPS,
+                bytes("")
+            )
+        );
+        _rethrowIfFailed(success, returnData);
+
+        uint256 expectedGov = (BID_AMOUNT * GOV_PERCENT_BPS) / 10_000;
+        uint256 expectedRefund = (BID_AMOUNT * REFUND_PERCENT_BPS) / 10_000;
+        uint256 expectedUser = BID_AMOUNT - expectedGov - expectedRefund + residual;
+
+        assertEq(harness.govPayoutAddr().balance - govBefore, expectedGov, "gov share");
+        assertEq(REFUND_ADDR.balance - refundBefore, expectedRefund, "refund share");
+        assertEq(USER_ADDR.balance - userBefore, expectedUser, "user share");
+        assertEq(address(harness).balance, 0, "harness drained");
+    }
+
+    function test_allocateValueCall_revertsWhenRefundRecipientMissing() public {
+        vm.deal(address(harness), BID_AMOUNT);
+
+        (bool success, bytes memory returnData) = _callWithAtlasContext(
+            abi.encodeWithSelector(
+                harness.callAllocateValue.selector,
+                address(0),
+                BID_AMOUNT,
+                address(0),
+                REFUND_PERCENT_BPS,
+                bytes("")
+            )
+        );
+
+        assertFalse(success, "call should revert");
+        assertEq(bytes4(returnData), BackrunDAppControl.InvalidRewardAddress.selector, "unexpected revert");
+    }
+
+    function _callWithAtlasContext(bytes memory data) internal returns (bool success, bytes memory returnData) {
+        bytes memory context = abi.encodePacked(USER_ADDR, address(harness), harness.CALL_CONFIG());
+        vm.prank(atlasAddress);
+        (success, returnData) = address(harness).call(bytes.concat(data, context));
+    }
+
+    function _rethrowIfFailed(bool success, bytes memory returnData) internal pure {
+        if (!success) {
+            assembly {
+                revert(add(returnData, 32), mload(returnData))
+            }
         }
-    }
-
-    function buildOperations(
-        bytes memory userOpData,
-        uint256 msgValue,
-        address bidToken
-    )
-        internal
-        returns (UserOperation memory userOp, SolverOperation[] memory solverOps, DAppOperation memory dAppOp)
-    {
-        // build user operation
-        userOp = txBuilder.buildUserOperation({
-            from: userEOA,
-            to: payable(address(control)),
-            maxFeePerGas: tx.gasprice + 1,
-            value: msgValue,
-            deadline: block.number + 20000,
-            data: userOpData
-        });
-
-        userOp.sessionKey = governanceEOA;
-        userOp.gas = userGas;
-
-        // build solver operation
-        solverOps = new SolverOperation[](1);
-        SolverOperation memory solverOp;
-        address solverContract;
-
-        (solverContract, solverOp) = _setUpSolver(solverEOA, solverPK, solverBidAmount, userOp, bidToken);        
-        solverOps[0] = solverOp;
-
-        // build dApp operation
-        dAppOp = txBuilder.buildDAppOperation(governanceEOA, userOp, solverOps);
-        dAppOp.bundler = userEOA;
-
-        (sig.v, sig.r, sig.s) = vm.sign(governancePK, ATLAS_VERIFICATION.getDAppOperationPayload(dAppOp));
-        dAppOp.signature = abi.encodePacked(sig.r, sig.s, sig.v);
-        return (userOp, solverOps, dAppOp);
-    }
-
-    function _setUpSolver(
-        address solverEOA,
-        uint256 solverPK,
-        uint256 bidAmount,
-        UserOperation memory userOp,
-        address bidToken
-    )
-        internal
-        returns (address solverContract, SolverOperation memory solverOp)
-    { 
-        vm.startPrank(userEOA);
-        SimpleSolver solver = new SimpleSolver(weth, ATLAS_ADDRESS);
-        deal(weth, address(solver), 100 ether);
-        
-        // Handle native token (ETH) differently from ERC20 tokens
-        if (bidToken == NATIVE_TOKEN) {
-            vm.deal(address(solver), bidAmount);
-        } else {
-            deal(bidToken, address(solver), bidAmount);
-        }
-
-        // Create signed solverOp
-        solverOp = _buildSolverOp(solverEOA, solverPK, address(solver), bidAmount, userOp, bidToken);
-        vm.stopPrank();
-
-        return (address(solver), solverOp);
-    }
-
-    function _buildSolverOp(
-        address solverEOA,
-        uint256 solverPK,
-        address solverContract,
-        uint256 bidAmount,
-        UserOperation memory userOp,
-        address bidToken
-    )
-        internal
-        returns (SolverOperation memory solverOp)
-    {
-        // Builds the SolverOperation
-        solverOp = txBuilder.buildSolverOperation({
-            userOp: userOp,
-            solverOpData: abi.encodeCall(SimpleSolver.solve, ()),
-            solver: solverEOA,
-            solverContract: address(solverContract),
-            bidAmount: bidAmount,
-            value: 0
-        });
-        solverOp.bidToken = bidToken;
-        solverOp.gas = solverGas;
-
-        // Sign solverOp
-        (sig.v, sig.r, sig.s) = vm.sign(solverPK, ATLAS_VERIFICATION.getSolverPayload(solverOp));
-        solverOp.signature = abi.encodePacked(sig.r, sig.s, sig.v);
     }
 }
 
-// Just bids `bidAmount` in ETH token - doesn't do anything else
-contract SimpleSolver is SolverBase {
-    bool internal s_shouldSucceed;
+contract BackrunDAppControlHarness is BackrunDAppControl {
+    constructor(address atlas, address govPayoutAddr, uint256 govPercent)
+        BackrunDAppControl(atlas, govPayoutAddr, govPercent)
+    {}
 
-    constructor(address weth, address atlas) SolverBase(weth, atlas, msg.sender) {
-        s_shouldSucceed = true; // should succeed by default, can be set to false
+    function callAllocateValue(
+        address bidToken,
+        uint256 bidAmount,
+        address refundRecipient,
+        uint256 refundPercent,
+        bytes calldata payload
+    ) external {
+        _setRefundParams(refundRecipient, refundPercent);
+        require(t_refundPercent == refundPercent, "refund percent unset");
+        require(t_refundRecipient == refundRecipient, "refund recipient unset");
+        _allocateValueCall(true, bidToken, bidAmount, payload);
     }
-
-    function shouldSucceed() public view returns (bool) {
-        return s_shouldSucceed;
-    }
-
-    function setShouldSucceed(bool succeed) public {
-        s_shouldSucceed = succeed;
-    }
-
-    function solve() public view onlySelf {
-        require(s_shouldSucceed, "Solver failed intentionally");
-
-        // The solver bid representing user's minAmountUserBuys of tokenUserBuys is sent to the
-        // Execution Environment in the payBids modifier logic which runs after this function ends.
-    }
-
-    // This ensures a function can only be called through atlasSolverCall
-    // which includes security checks to work safely with Atlas
-    modifier onlySelf() {
-        require(msg.sender == address(this), "Not called via atlasSolverCall");
-        _;
-    }
-
-    fallback() external payable { }
-    receive() external payable { }
 }
