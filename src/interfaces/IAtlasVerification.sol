@@ -44,13 +44,7 @@ interface IAtlasVerification {
     function getDAppNextNonce(address dApp) external view returns (uint256 nextNonce);
     function userSequentialNonceTrackers(address account) external view returns (uint256 lastUsedSeqNonce);
     function dAppSequentialNonceTrackers(address account) external view returns (uint256 lastUsedSeqNonce);
-    function userNonSequentialNonceTrackers(
-        address account,
-        uint248 wordIndex
-    )
-        external
-        view
-        returns (uint256 bitmap);
+    function userNonSequentialNonceTrackers(address account, uint248 wordIndex) external view returns (uint256 bitmap);
 
     // DAppIntegration.sol
     function initializeGovernance(address control) external;
