@@ -1,0 +1,23 @@
+{
+  "lib/atlas": {
+    "branch": {
+      "name": "atlas-v1.6.4",
+      "rev": "083dccd05a2c92e0e9cae90ac404504f741bc493"
+    }
+  },
+  "lib/forge-std": {
+    "rev": "b93cf4bc34ff214c099dc970b153f85ade8c9f66"
+  },
+  "lib/openzeppelin-contracts": {
+    "rev": "69c8def5f222ff96f2b5beff05dfba996368aa79"
+  },
+  "lib/solady": {
+    "rev": "6c2d0da6397e3c016aabc3f298de1b92c6ce7405"
+  },
+  "lib/v3-core": {
+    "rev": "e3589b192d0be27e100cd0daaf6c97204fdb1899"
+  },
+  "lib/v3-periphery": {
+    "rev": "80f26c86c57b8a5e4b913f42844d4c8bd274d058"
+  }
+}
