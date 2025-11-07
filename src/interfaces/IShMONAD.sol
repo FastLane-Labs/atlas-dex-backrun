@@ -65,7 +65,13 @@ interface IShMonad is IERC4626Custom, IERC20Full {
      * @param newMinBalance The new minimum balance to maintain (affects top-up settings)
      * @return unbondBlock The block number when the unbonding period will be complete
      */
-    function unbond(uint64 policyID, uint256 shares, uint256 newMinBalance) external returns (uint256 unbondBlock);
+    function unbond(
+        uint64 policyID,
+        uint256 shares,
+        uint256 newMinBalance
+    )
+        external
+        returns (uint256 unbondBlock);
 
     /**
      * @notice Unbonds shares and schedules a task to automatically claim them after the escrow period
@@ -105,7 +111,13 @@ interface IShMonad is IERC4626Custom, IERC20Full {
      * @param bondRecipient The address that will own the bonded shares
      * @param shares The amount of shMON shares to claim and rebond
      */
-    function claimAndRebond(uint64 fromPolicyID, uint64 toPolicyID, address bondRecipient, uint256 shares) external;
+    function claimAndRebond(
+        uint64 fromPolicyID,
+        uint64 toPolicyID,
+        address bondRecipient,
+        uint256 shares
+    )
+        external;
 
     /**
      * @notice Claims unbonded shares as a scheduled task after escrow period completion
