@@ -1,9 +1,16 @@
 {
-  "name": "atlas-baseswap",
+  "name": "atlas-dex-backrun",
   "version": "1.0.0",
-  "repository": "https://github.com/FastLane-Labs/atlas-baseswap",
+  "repository": "https://github.com/FastLane-Labs/atlas-dex-backrun",
   "author": "FastLane",
   "scripts": {
-    "deploy-base-sepolia": "source .env && forge script script/deploy_sepolia.s.sol:DeployBaseSwapSepoliaDAppControlScript --rpc-url ${BASE_SEPOLIA_RPC_URL} --broadcast --etherscan-api-key ${BASESCAN_API_KEY} --verify --delay 30"
+    "deploy-monad-testnet": "source .env && forge script script/deploy_backrunDAppControl.s.sol:DeployBackrunDAppControlScript --rpc-url ${MONAD_TESTNET_RPC_URL} --broadcast --delay 30",
+    "deploy-monad-testnet-ledger": "source .env && forge script script/deploy_backrunDAppControl.s.sol:DeployBackrunDAppControlScript --rpc-url ${MONAD_TESTNET_RPC_URL} --broadcast --delay 30 --ledger --sender ${LEDGER_ADDRESS}",
+    "deploy-monad-mainnet": "source .env && forge script script/deploy_backrunDAppControl.s.sol:DeployBackrunDAppControlScript --rpc-url ${MONAD_MAINNET_RPC_URL} --broadcast --delay 30",
+    "deploy-monad-mainnet-ledger": "source .env && forge script script/deploy_backrunDAppControl.s.sol:DeployBackrunDAppControlScript --rpc-url ${MONAD_MAINNET_RPC_URL} --broadcast --delay 30 --ledger --sender ${LEDGER_ADDRESS}",
+    "add-router-monad-testnet": "source .env && forge script script/addRouter_backrunDAppControl.s.sol:AddRouterBackrunDAppControlScript --rpc-url ${MONAD_TESTNET_RPC_URL} --broadcast --delay 30",
+    "add-router-monad-testnet-ledger": "source .env && forge script script/addRouter_backrunDAppControl.s.sol:AddRouterBackrunDAppControlScript --rpc-url ${MONAD_TESTNET_RPC_URL} --broadcast --delay 30 --ledger --sender ${LEDGER_ADDRESS}",
+    "add-router-monad-mainnet": "source .env && forge script script/addRouter_backrunDAppControl.s.sol:AddRouterBackrunDAppControlScript --rpc-url ${MONAD_MAINNET_RPC_URL} --broadcast --delay 30",
+    "add-router-monad-mainnet-ledger": "source .env && forge script script/addRouter_backrunDAppControl.s.sol:AddRouterBackrunDAppControlScript --rpc-url ${MONAD_MAINNET_RPC_URL} --broadcast --delay 30 --ledger --sender ${LEDGER_ADDRESS}"
   }
 }

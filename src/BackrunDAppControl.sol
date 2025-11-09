@@ -186,14 +186,7 @@ contract BackrunDAppControl is DAppControl {
      * @param _refundPercent The percentage of the bid amount that goes to the refund recipient
      * @dev Entry point function handles ETH swaps and preOps call handles erc20 swaps
      */
-    function swap(
-        SwapTokenInfo calldata _swapInfo,
-        address _refundRecipient,
-        uint256 _refundPercent
-    )
-        external
-        payable
-    {
+    function swap(SwapTokenInfo calldata _swapInfo, address _refundRecipient, uint256 _refundPercent) external payable {
         // If the input token is ETH, call the swap function with msg.value
         if (_swapInfo.inputToken == _ETH) {
             require(msg.value == _swapInfo.inputAmount, InsufficientUserOpValue());
