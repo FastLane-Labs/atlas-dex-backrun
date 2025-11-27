@@ -20,11 +20,13 @@ struct SwapTokenInfo {
 
 contract BackrunDAppControl is DAppControl {
     uint256 internal constant BPS_SCALE = 10_000; //basis points denominator
-    uint32 internal constant DAPP_GAS_LIMIT = 3_000_000;
     address internal constant _ETH = address(0); // address of the ETH token
 
     uint256 public govPercent;
     address public govPayoutAddr;
+
+    uint32 internal solverGasLimit = 6_000_000;
+    uint32 internal dappGasLimit = 10_000_000;
 
     // 0: not available
     // 1: transfer to EE and approve router
@@ -61,7 +63,6 @@ contract BackrunDAppControl is DAppControl {
     error InsufficientOutputBalance();
     error InsufficientUserOpValue();
     error InvalidRewardAddress();
-    error InvalidUserOpData();
     error OnlyGovernance();
     error OnlyControl();
     error UserOpDappNotSwapRouter();
@@ -175,6 +176,24 @@ contract BackrunDAppControl is DAppControl {
         emit RouterRemoved(_router);
     }
 
+    /**
+     * @notice Sets the solver gas limit
+     * @param _solverGasLimit The new solver gas limit
+     * @dev This function can only be called by the governance
+     */
+    function setSolverGasLimit(uint32 _solverGasLimit) external onlyGovernance {
+        solverGasLimit = _solverGasLimit;
+    }
+
+    /**
+     * @notice Sets the dapp gas limit
+     * @param _dappGasLimit The new dapp gas limit
+     * @dev This function can only be called by the governance
+     */
+    function setDAppGasLimit(uint32 _dappGasLimit) external onlyGovernance {
+        dappGasLimit = _dappGasLimit;
+    }
+
     // ---------------------------------------------------- //
     //                  ENTRYPOINT FUNCTION                 //
     // ---------------------------------------------------- //
@@ -182,11 +201,9 @@ contract BackrunDAppControl is DAppControl {
     /**
      * @notice Swaps tokens using the provided swap info
      * @param _swapInfo The swap info containing the input token, input amount, output token, output min, and target
-     * @param _refundRecipient The address that will receive the refund
-     * @param _refundPercent The percentage of the bid amount that goes to the refund recipient
      * @dev Entry point function handles ETH swaps and preOps call handles erc20 swaps
      */
-    function swap(SwapTokenInfo calldata _swapInfo, address _refundRecipient, uint256 _refundPercent) external payable {
+    function swap(SwapTokenInfo calldata _swapInfo, address, uint256) external payable {
         // If the input token is ETH, call the swap function with msg.value
         if (_swapInfo.inputToken == _ETH) {
             require(msg.value == _swapInfo.inputAmount, InsufficientUserOpValue());
@@ -247,16 +264,7 @@ contract BackrunDAppControl is DAppControl {
         if (solverOp.bidToken != _swapInfo.outputToken) revert WrongBidToken();
     }
 
-    function _allocateValueCall(
-        bool solverSuccess,
-        address _bidToken,
-        uint256 bidAmount,
-        bytes calldata
-    )
-        internal
-        virtual
-        override
-    {
+    function _allocateValueCall(bool, address _bidToken, uint256 bidAmount, bytes calldata) internal virtual override {
         (address _refundRecipient, uint256 _refundPercent) = _getRefundParams();
         (address _govPayoutAddr, uint256 _govPercent) = BackrunDAppControl(payable(CONTROL)).getPayoutData();
         require(_govPercent + _refundPercent <= BPS_SCALE, GovPercentExceedsScale());
@@ -316,8 +324,12 @@ contract BackrunDAppControl is DAppControl {
         return routerWhitelist[_router];
     }
 
-    function getDAppGasLimit() public view virtual override returns (uint32) {
-        return DAPP_GAS_LIMIT;
+    function getSolverGasLimit() public view override returns (uint32) {
+        return solverGasLimit;
+    }
+
+    function getDAppGasLimit() public view override returns (uint32) {
+        return dappGasLimit;
     }
 
     // Add fallback function to handle incoming ETH
